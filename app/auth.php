@@ -112,16 +112,27 @@ function is_president() {
 
 function login_user($email,$password) {
     global $pdo;
-    $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
-                r.nombre AS rol_nombre, r.activo AS rol_activo
+    try {
+        $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
+                    r.nombre AS rol_nombre, r.activo AS rol_activo
+                FROM usuarios u
+                LEFT JOIN unidades un ON un.id=u.unidad_id
+                LEFT JOIN roles r ON r.id=u.rol_id
+                WHERE u.email=? AND u.activo=1");
+        $st->execute([$email]);
+        $u=$st->fetch();
+    } catch (Throwable $e) {
+        // Permite seguir entrando mientras V3 todavía no se haya ejecutado.
+        $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera
             FROM usuarios u
             LEFT JOIN unidades un ON un.id=u.unidad_id
-            LEFT JOIN roles r ON r.id=u.rol_id
             WHERE u.email=? AND u.activo=1");
-    $st->execute([$email]);
-    $u=$st->fetch();
+        $st->execute([$email]);
+        $u=$st->fetch();
+    }
 
-    if ($u && ($u['rol']??'PRESIDENTE') !== 'PRESIDENTE' && array_key_exists('rol_activo',$u) && !(int)$u['rol_activo']) {
+    if ($u && array_key_exists('rol_activo',$u)
+        && ($u['rol']??'') !== 'PRESIDENTE' && !(int)$u['rol_activo']) {
         return false;
     }
 
