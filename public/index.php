@@ -200,7 +200,7 @@ case 'propietarios':
             }catch(Throwable $e){$pdo->rollBack();echo '<div class="alert">No se pudo registrar el cambio de propietario: '.h($e->getMessage()).'</div>';}
         }
     }
-    echo '<h1>Cambio de propietario</h1><div class="card"><form method="post" class="form"><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href='index.php?page=propietarios&unidad_id='+this.value">';
+    echo '<h1>Cambio de propietario</h1><div class="card"><form method="post" class="form"><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href=\'index.php?page=propietarios&unidad_id=\'+this.value">';
     foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'"'.((int)($_GET['unidad_id']??0)===(int)$x['id']?' selected':'').'>'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
     echo '</select>';
     $sel=(int)($_GET['unidad_id']??1);$st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$sel]);$unit=$st->fetch();
