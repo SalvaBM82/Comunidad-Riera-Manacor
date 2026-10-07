@@ -4,9 +4,9 @@ require_once __DIR__.'/../app/functions.php';
 require_once __DIR__.'/../app/backups.php';
 
 $page=$_GET['page']??'dashboard';
-if($currentPage==='logout'){ logout_user(); header('Location: index.php?page=login'); exit; }
+if($page==='logout'){ logout_user(); header('Location: index.php?page=login'); exit; }
 
-if($currentPage==='login'){
+if($page==='login'){
     $err='';
     if($_SERVER['REQUEST_METHOD']==='POST'){
         if(login_user(trim($_POST['email']),$_POST['password'])){ header('Location:index.php'); exit; }
@@ -18,7 +18,7 @@ if($currentPage==='login'){
 }
 require_login();
 
-if($currentPage==='backups' && ($_GET['action']??'')==='download'){
+if($page==='backups' && ($_GET['action']??'')==='download'){
     if(!can('GESTION_BACKUPS')){http_response_code(403);exit('No tienes permiso para gestionar copias de seguridad.');}
     $sql=backup_generate_sql();
     $filename='backup_comunidad_'.date('Y-m-d_H-i-s').'.sql';
@@ -28,7 +28,7 @@ if($currentPage==='backups' && ($_GET['action']??'')==='download'){
     echo $sql;
     exit;
 }
-if($currentPage==='backups' && $_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['restore_backup'])){
+if($page==='backups' && $_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['restore_backup'])){
     if(!can('GESTION_BACKUPS')){http_response_code(403);exit('No tienes permiso para restaurar copias de seguridad.');}
     if(!isset($_FILES['backup_file']) || $_FILES['backup_file']['error']!==UPLOAD_ERR_OK) exit('No se ha podido subir el archivo de backup.');
     if($_FILES['backup_file']['size']>100*1024*1024) exit('El archivo supera el límite de 100 MB.');
