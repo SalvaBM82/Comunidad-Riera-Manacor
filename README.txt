@@ -14,6 +14,14 @@ INSTALACIÓN
    Si no puedes usar public/ como raíz, configura el DocumentRoot del hosting.
 5. Abre la web.
 
+ACTUALIZACIÓN V2 (instalación existente)
+1. Haz una copia de seguridad de la base de datos.
+2. Importa `database/migration_v2.sql` sobre la base de datos existente. No vuelvas a importar `database/database.sql`.
+3. La V2 añade Administración → Usuarios y roles y Administración → Cambios de propietario.
+4. Los roles son: PRESIDENTE, PROPIETARIO_ESCALERA y PROPIETARIO_SIN_ESCALERA.
+5. Los cambios de propietario se guardan en `propietarios_historial` y no eliminan el histórico económico de la unidad.
+6. Mantén `config/config.php` únicamente en el hosting; no publiques credenciales reales en GitHub.
+
 ACCESO INICIAL
 Email: admin@comunidad.local
 Contraseña: Cambiar123!
@@ -29,6 +37,8 @@ ESTRUCTURA
 
 FUNCIONALIDAD INCLUIDA
 - Login y roles
+- Administración de usuarios y roles
+- Cambio de propietario con histórico
 - Dashboard
 - Unidades y coeficientes
 - Gastos GENERAL / ESCALERA
