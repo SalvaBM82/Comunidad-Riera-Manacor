@@ -46,7 +46,8 @@ CREATE TABLE gastos (
  pagado TINYINT(1) NOT NULL DEFAULT 0,
  created_by INT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
- FOREIGN KEY (created_by) REFERENCES usuarios(id) ON DELETE SET NULL
+ FOREIGN KEY (created_by) REFERENCES usuarios(id) ON DELETE SET NULL,
+ INDEX idx_documentos_entidad (entidad_tipo,entidad_id)
 );
 
 CREATE TABLE presupuestos (
@@ -116,6 +117,8 @@ CREATE TABLE documentos (
  titulo VARCHAR(255) NOT NULL,
  categoria VARCHAR(100),
  archivo_url VARCHAR(500) NOT NULL,
+ entidad_tipo VARCHAR(40) NULL,
+ entidad_id INT NULL,
  created_by INT NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  FOREIGN KEY (created_by) REFERENCES usuarios(id) ON DELETE SET NULL
@@ -142,9 +145,17 @@ CREATE TABLE votaciones (
  titulo VARCHAR(255) NOT NULL,
  descripcion TEXT,
  tipo ENUM('GENERAL','ESCALERA') NOT NULL,
+ convocatoria VARCHAR(100) NULL,
  fecha_inicio DATETIME NOT NULL,
  fecha_fin DATETIME NOT NULL,
- estado ENUM('ABIERTA','CERRADA') NOT NULL DEFAULT 'ABIERTA'
+ mayoria VARCHAR(30) NOT NULL DEFAULT 'SIMPLE',
+ coef_minimo DECIMAL(5,2) NULL,
+ quorum_minimo DECIMAL(5,2) NULL,
+ estado ENUM('ABIERTA','CERRADA') NOT NULL DEFAULT 'ABIERTA',
+ cerrada_at DATETIME NULL,
+ created_by INT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ FOREIGN KEY (created_by) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 
 CREATE TABLE votos (
@@ -152,8 +163,11 @@ CREATE TABLE votos (
  votacion_id INT NOT NULL,
  unidad_id INT NOT NULL,
  voto ENUM('SI','NO','ABSTENCION') NOT NULL,
+ coeficiente DECIMAL(8,4) NOT NULL DEFAULT 0,
+ comentario VARCHAR(500) NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  UNIQUE KEY uq_voto (votacion_id,unidad_id),
+ INDEX idx_votos_votacion (votacion_id),
  FOREIGN KEY (votacion_id) REFERENCES votaciones(id) ON DELETE CASCADE,
  FOREIGN KEY (unidad_id) REFERENCES unidades(id) ON DELETE CASCADE
 );

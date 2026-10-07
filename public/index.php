@@ -27,7 +27,8 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['documento_action'])){
         'presupuesto'=>['table'=>'presupuestos','permission'=>'GESTION_PRESUPUESTOS'],
         'recibo'=>['table'=>'recibos','permission'=>'GESTION_RECIBOS'],
         'derrama'=>['table'=>'derramas','permission'=>'GESTION_DERRAMAS'],
-        'incidencia'=>['table'=>'incidencias','permission'=>'GESTION_INCIDENCIAS']
+        'incidencia'=>['table'=>'incidencias','permission'=>'GESTION_INCIDENCIAS'],
+        'votacion'=>['table'=>'votaciones','permission'=>'GESTION_VOTACIONES']
     ];
     if(!isset($allowed[$tipo]) || $entidadId<1) exit('Entidad documental no válida.');
     if(!can($allowed[$tipo]['permission'])){ http_response_code(403); exit('No tienes permiso para gestionar esta entidad.'); }
@@ -63,7 +64,7 @@ layout_start(ucfirst($page));
 
 if(isset($_GET['docs_tipo'],$_GET['docs_id'])){
     $docsTipo=trim($_GET['docs_tipo']); $docsId=(int)$_GET['docs_id'];
-    $docsNames=['gasto'=>'Gasto','presupuesto'=>'Presupuesto','recibo'=>'Recibo','derrama'=>'Derrama','incidencia'=>'Incidencia'];
+    $docsNames=['gasto'=>'Gasto','presupuesto'=>'Presupuesto','recibo'=>'Recibo','derrama'=>'Derrama','incidencia'=>'Incidencia','votacion'=>'Votación'];
     if(isset($docsNames[$docsTipo]) && $docsId>0) documentos_panel($docsTipo,$docsId,$docsNames[$docsTipo].' · Documentos');
 }
 
@@ -286,7 +287,92 @@ case 'documentos':
 break;
 
 case 'votaciones':
-    echo '<h1>Votaciones</h1><div class="card"><p>Módulo de votaciones preparado para temas GENERAL y ESCALERA.</p><p class="muted">La base de datos incluye votaciones y votos con bloqueo por unidad.</p></div>';
+    if(!can('GESTION_VOTACIONES')){echo '<div class="alert">No tienes permiso para gestionar votaciones.</div>';break;}
+    $voteError='';
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        try{
+            $action=$_POST['vote_action']??'';
+            if($action==='create_vote'){
+                $titulo=trim($_POST['titulo']??''); $descripcion=trim($_POST['descripcion']??'');
+                $tipo=strtoupper($_POST['tipo']??'GENERAL'); $mayoria=strtoupper($_POST['mayoria']??'SIMPLE');
+                $inicio=$_POST['fecha_inicio']??''; $fin=$_POST['fecha_fin']??'';
+                $inicio=$inicio!==''?str_replace('T',' ',$inicio):date('Y-m-d H:i:s');
+                $fin=$fin!==''?str_replace('T',' ',$fin):date('Y-m-d H:i:s',strtotime('+7 days'));
+                $quorum=$_POST['quorum_minimo']!==''?(float)$_POST['quorum_minimo']:null;
+                $coefMin=$_POST['coef_minimo']!==''?(float)$_POST['coef_minimo']:null;
+                if($titulo==='' || !in_array($tipo,['GENERAL','ESCALERA'],true) || !in_array($mayoria,['SIMPLE','ABSOLUTA','3_5','UNANIMIDAD','COEFICIENTE'],true)) throw new Exception('Revisa los datos de la votación.');
+                $pdo->prepare("INSERT INTO votaciones(titulo,descripcion,tipo,convocatoria,fecha_inicio,fecha_fin,mayoria,coef_minimo,quorum_minimo,estado,created_by) VALUES(?,?,?,?,?,?,?,?,?,'ABIERTA',?)")
+                    ->execute([$titulo,$descripcion,$tipo,trim($_POST['convocatoria']??'')?:null,$inicio,$fin,$mayoria,$coefMin,$quorum,current_user()['id']]);
+                $vid=(int)$pdo->lastInsertId(); log_action('Creó votación #'.$vid,'votaciones');
+                header('Location:index.php?page=votaciones&vote='.$vid); exit;
+            }
+            if($action==='cast_vote'){
+                $vid=(int)$_POST['votacion_id']; $unidad=(int)$_POST['unidad_id']; $valor=strtoupper($_POST['voto']??'');
+                if(!in_array($valor,['SI','NO','ABSTENCION'],true)) throw new Exception('Voto no válido.');
+                $st=$pdo->prepare("SELECT * FROM votaciones WHERE id=? AND estado='ABIERTA'");$st->execute([$vid]);$v=$st->fetch();
+                if(!$v) throw new Exception('La votación no está abierta.');
+                $st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$unidad]);$un=$st->fetch();
+                if(!$un) throw new Exception('Unidad no válida.');
+                $coef=$v['tipo']==='ESCALERA'?(float)$un['coef_escalera']:(float)$un['coef_general'];
+                if($coef<=0) throw new Exception('La unidad no participa en esta votación.');
+                $pdo->prepare("INSERT INTO votos(votacion_id,unidad_id,voto,coeficiente,comentario) VALUES(?,?,?,?,?) ON DUPLICATE KEY UPDATE voto=VALUES(voto),coeficiente=VALUES(coeficiente),comentario=VALUES(comentario)")
+                    ->execute([$vid,$unidad,$valor,$coef,trim($_POST['comentario']??'')?:null]);
+                log_action('Registró voto en votación #'.$vid,'votos');
+                header('Location:index.php?page=votaciones&vote='.$vid); exit;
+            }
+            if($action==='close_vote'){
+                $vid=(int)$_POST['votacion_id'];
+                $st=$pdo->prepare("SELECT * FROM votaciones WHERE id=? AND estado='ABIERTA'");$st->execute([$vid]);$v=$st->fetch();
+                if(!$v) throw new Exception('La votación no está abierta.');
+                $pdo->prepare("UPDATE votaciones SET estado='CERRADA',cerrada_at=NOW() WHERE id=?")->execute([$vid]);
+                log_action('Cerró votación #'.$vid,'votaciones');
+                header('Location:index.php?page=votaciones&vote='.$vid); exit;
+            }
+        }catch(Throwable $e){$voteError=$e->getMessage();}
+    }
+    if($voteError) echo '<div class="alert">'.h($voteError).'</div>';
+    echo '<h1>Votaciones</h1>';
+    echo '<div class="card"><h2>Nueva votación</h2><form method="post" class="form">
+        <input type="hidden" name="vote_action" value="create_vote">
+        <label>Título / asunto</label><input name="titulo" required>
+        <label>Descripción / propuesta</label><textarea name="descripcion" rows="3"></textarea>
+        <label>Convocatoria</label><input name="convocatoria" placeholder="Junta ordinaria, extraordinaria...">
+        <label>Tipo</label><select name="tipo"><option value="GENERAL">GENERAL</option><option value="ESCALERA">ESCALERA</option></select>
+        <label>Mayoría</label><select name="mayoria"><option value="SIMPLE">Mayoría simple</option><option value="ABSOLUTA">Mayoría absoluta</option><option value="3_5">3/5</option><option value="UNANIMIDAD">Unanimidad</option><option value="COEFICIENTE">Coeficiente mínimo personalizado</option></select>
+        <label>Coeficiente mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="coef_minimo">
+        <label>Quórum mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="quorum_minimo">
+        <label>Inicio</label><input type="datetime-local" name="fecha_inicio">
+        <label>Fin</label><input type="datetime-local" name="fecha_fin">
+        <br><button class="btn">Crear votación</button></form></div><br>';
+    $votes=$pdo->query("SELECT v.*,u.email creador FROM votaciones v LEFT JOIN usuarios u ON u.id=v.created_by ORDER BY v.id DESC")->fetchAll();
+    echo '<div class="card"><h2>Votaciones</h2><table><tr><th>Asunto</th><th>Tipo</th><th>Mayoría</th><th>Estado</th><th>Participación</th><th>Documentos</th></tr>';
+    foreach($votes as $v){
+        $st=$pdo->prepare("SELECT COUNT(*) n,COALESCE(SUM(coeficiente),0) coef FROM votos WHERE votacion_id=?");$st->execute([$v['id']]);$res=$st->fetch();
+        $total=(float)$pdo->query($v['tipo']==='ESCALERA'?"SELECT COALESCE(SUM(coef_escalera),0) FROM unidades":"SELECT COALESCE(SUM(coef_general),0) FROM unidades")->fetchColumn();
+        $pct=$total>0?((float)$res['coef']/$total*100):0;
+        echo '<tr><td><a href="index.php?page=votaciones&vote='.$v['id'].'">'.h($v['titulo']).'</a></td><td>'.h($v['tipo']).'</td><td>'.h($v['mayoria']).'</td><td>'.h($v['estado']).'</td><td>'.number_format($pct,2,',','.').'%</td><td><a href="index.php?page=votaciones&vote='.$v['id'].'&docs_tipo=votacion&docs_id='.$v['id'].'">'.documentos_count('votacion',$v['id']).'</a></td></tr>';
+    }
+    echo '</table></div>';
+    $voteId=(int)($_GET['vote']??0);
+    if($voteId){
+        $st=$pdo->prepare("SELECT * FROM votaciones WHERE id=?");$st->execute([$voteId]);$v=$st->fetch();
+        if($v){
+            echo '<br><div class="card"><h2>'.h($v['titulo']).'</h2><p>'.nl2br(h($v['descripcion']??'')).'</p><p><b>'.h($v['tipo']).'</b> · Mayoría: '.h($v['mayoria']).' · Estado: '.h($v['estado']).'</p>';
+            echo '<p><a class="btn gray" href="index.php?page=votaciones&docs_tipo=votacion&docs_id='.$v['id'].'">Documentos ('.documentos_count('votacion',$v['id']).')</a></p>';
+            if($v['estado']==='ABIERTA'){
+                echo '<h3>Registrar / cambiar voto</h3><form method="post" class="form"><input type="hidden" name="vote_action" value="cast_vote"><input type="hidden" name="votacion_id" value="'.$v['id'].'"><label>Unidad</label><select name="unidad_id">';
+                foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $un){$coef=$v['tipo']==='ESCALERA'?(float)$un['coef_escalera']:(float)$un['coef_general'];if($coef>0) echo '<option value="'.$un['id'].'">'.h($un['nombre']).' — '.h($un['propietario']).' ('.$coef.'%)</option>';}
+                echo '</select><label>Voto</label><select name="voto"><option value="SI">Sí</option><option value="NO">No</option><option value="ABSTENCION">Abstención</option></select><label>Comentario</label><textarea name="comentario" rows="2"></textarea><br><button class="btn">Guardar voto</button></form>';
+                echo '<form method="post" style="margin-top:12px"><input type="hidden" name="vote_action" value="close_vote"><input type="hidden" name="votacion_id" value="'.$v['id'].'"><button class="btn gray" onclick="return confirm(\'¿Cerrar esta votación? Ya no se podrán modificar los votos.\')">Cerrar votación</button></form>';
+            }
+            $st=$pdo->prepare("SELECT vo.*,un.nombre unidad,un.propietario FROM votos vo JOIN unidades un ON un.id=vo.unidad_id WHERE vo.votacion_id=? ORDER BY vo.id");$st->execute([$voteId]);$vr=$st->fetchAll();
+            $si=$no=$ab=0;foreach($vr as $vv){if($vv['voto']==='SI')$si+=(float)$vv['coeficiente'];elseif($vv['voto']==='NO')$no+=(float)$vv['coeficiente'];else$ab+=(float)$vv['coeficiente'];}
+            echo '<h3>Resultado actual</h3><p>Sí: <b>'.number_format($si,2,',','.').'%</b> · No: <b>'.number_format($no,2,',','.').'%</b> · Abstención: <b>'.number_format($ab,2,',','.').'%</b></p>';
+            echo '<table><tr><th>Unidad</th><th>Propietario</th><th>Voto</th><th>Coeficiente</th><th>Comentario</th></tr>';
+            foreach($vr as $vv) echo '<tr><td>'.h($vv['unidad']).'</td><td>'.h($vv['propietario']).'</td><td>'.h($vv['voto']).'</td><td>'.number_format($vv['coeficiente'],2,',','.').'%</td><td>'.h($vv['comentario']??'').'</td></tr>';
+            echo '</table></div>';
+        }
+    }
 break;
 
 
