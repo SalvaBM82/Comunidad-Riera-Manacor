@@ -20,6 +20,15 @@ ACTUALIZACIÓN V2 (instalación existente)
 3. La V2 añade Administración → Usuarios y roles y Administración → Cambios de propietario.
 4. Los roles iniciales son: PRESIDENTE, PROPIETARIO_ESCALERA y PROPIETARIO_SIN_ESCALERA.
 
+
+ACTUALIZACIÓN V4 — MÚLTIPLES ROLES
+1. Después de V3, importa `database/migration_v4.sql`.
+2. Un usuario puede tener varios roles simultáneamente. Los permisos se acumulan entre todos sus roles.
+3. El rol Presidente ya no implica ser Administrador: un usuario puede ser Administrador sin ser Presidente.
+4. Se crean como roles habituales: Presidente, Vicepresidente, Administrador, Secretario, Tesorero, Vocal, Propietario, Propietario con escalera y Propietario sin escalera.
+5. La condición de participación en escalera pertenece a la unidad; no es necesario utilizar el rol para determinar el coeficiente.
+6. En Administración → Usuarios se pueden marcar varios roles para cada usuario.
+
 ACTUALIZACIÓN V3 — ROLES Y USUARIOS CONFIGURABLES
 1. Después de V2, importa `database/migration_v3.sql`.
 2. Administración → Usuarios permite editar email, unidad, rol, estado y contraseña de cualquier usuario.
