@@ -7,7 +7,7 @@ if($page==='logout'){ logout_user(); header('Location: index.php?page=login'); e
 
 if($page==='login'){
     $err='';
-    if(can('GESTION_INCIDENCIAS') && $_SERVER['REQUEST_METHOD']==='POST'){
+    if($_SERVER['REQUEST_METHOD']==='POST'){
         if(login_user(trim($_POST['email']),$_POST['password'])){ header('Location:index.php'); exit; }
         $err='Email o contraseña incorrectos.';
     }
@@ -122,7 +122,7 @@ case 'morosidad':
 break;
 
 case 'incidencias':
-    if($_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_INCIDENCIAS') && $_SERVER['REQUEST_METHOD']==='POST'){
         $pdo->prepare("INSERT INTO incidencias(titulo,descripcion,tipo,created_by) VALUES(?,?,?,?)")->execute([$_POST['titulo'],$_POST['descripcion'],$_POST['tipo'],current_user()['id']]);
         header('Location:index.php?page=incidencias');exit;
     }
