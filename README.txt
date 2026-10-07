@@ -37,6 +37,7 @@ ACTUALIZACIÓN V3 — ROLES Y USUARIOS CONFIGURABLES
 5. El Presidente mantiene acceso completo y no puede quedar desactivado.
 6. Los cambios de propietario siguen guardándose en `propietarios_historial`.
 7. Mantén `config/config.php` únicamente en el hosting; no publiques credenciales reales en GitHub.
+8. Los documentos se gestionan mediante enlaces externos (HTTP/HTTPS); no se suben archivos al servidor. Los gastos permiten enlazar también su factura/documento externo.
 
 ACCESO INICIAL
 Email: admin@comunidad.local
@@ -56,7 +57,7 @@ FUNCIONALIDAD INCLUIDA
 - Administración de usuarios y roles
 - Cambio de propietario con histórico
 - Dashboard
-- Unidades y coeficientes
+- Unidades y coeficientes (alta, edición y borrado protegido)
 - Gastos GENERAL / ESCALERA
 - Presupuestos
 - Generación mensual de recibos
@@ -72,7 +73,7 @@ ESCALERA: Piso 1 50%, Piso 2 50%; Local y Garaje 0%
 
 Esta entrega es una base funcional inicial. Antes de ponerla en producción conviene completar:
 - recuperación/cambio de contraseña
-- subida real de documentos
+- subida real de documentos (se utiliza enlace externo en su lugar)
 - certificado de deuda PDF Art. 21 LPH
 - cálculo de intereses por tramos
 - adelantos con pantalla y trazabilidad completa
