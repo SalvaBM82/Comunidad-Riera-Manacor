@@ -62,4 +62,4 @@ WHERE u.rol_id IS NULL;
 ALTER TABLE usuarios
   MODIFY rol VARCHAR(50) NOT NULL DEFAULT 'PROPIETARIO_SIN_ESCALERA';
 
-CREATE INDEX IF NOT EXISTS idx_usuarios_rol_id ON usuarios(rol_id);
+ALTER TABLE usuarios ADD INDEX idx_usuarios_rol_id (rol_id);
