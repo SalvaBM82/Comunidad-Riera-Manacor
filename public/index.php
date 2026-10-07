@@ -149,6 +149,7 @@ case 'unidades':
 
     $unitError='';
     if($_SERVER['REQUEST_METHOD']==='POST'){
+        if(!can('GESTION_USUARIOS')){http_response_code(403);exit('No tienes permiso para gestionar usuarios.');}
         $action=$_POST['action']??'';
         try{
             if($action==='create_unit'){
@@ -465,7 +466,7 @@ case 'usuarios':
                     header('Location:index.php?page=usuarios');exit;
                 }catch(Throwable $e){
                     if($pdo->inTransaction()) $pdo->rollBack();
-                    echo '<div class="alert">No se pudo crear el usuario. Comprueba el email y los roles seleccionados.</div>';
+                    echo '<div class="alert">No se pudo crear el usuario: '.h($e->getMessage()).'</div>';
                 }
             }
         } elseif($action==='update'){
@@ -503,7 +504,29 @@ case 'usuarios':
                     header('Location:index.php?page=usuarios');exit;
                 }catch(Throwable $e){
                     if($pdo->inTransaction()) $pdo->rollBack();
-                    echo '<div class="alert">No se pudo actualizar el usuario. Comprueba el email y los roles seleccionados.</div>';
+                    echo '<div class="alert">No se pudo actualizar el usuario: '.h($e->getMessage()).'</div>';
+                }
+            }
+        } elseif($action==='delete'){
+            $id=(int)($_POST['id']??0);
+            if(!$id){
+                echo '<div class="alert">Usuario no válido.</div>';
+            } elseif($id===(int)current_user()['id']){
+                echo '<div class="alert">No puedes eliminar tu propio usuario.</div>';
+            } else {
+                try{
+                    $st=$pdo->prepare("SELECT id,email FROM usuarios WHERE id=?");
+                    $st->execute([$id]);
+                    $target=$st->fetch();
+                    if(!$target) throw new Exception('El usuario no existe.');
+                    $pdo->beginTransaction();
+                    $pdo->prepare("DELETE FROM usuarios WHERE id=?")->execute([$id]);
+                    $pdo->commit();
+                    log_action('Eliminó usuario #'.$id.' ('.($target['email']??'').')','usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo eliminar el usuario: '.h($e->getMessage()).'</div>';
                 }
             }
         } elseif($action==='password'){
@@ -533,7 +556,7 @@ case 'usuarios':
         $assignedIds=array_map('intval',array_column($assigned,'id'));
         echo '<tr><td>'.h($x['email']).'</td><td>'.h($x['unidad_nombre']??'Sin unidad').'</td><td><div class="role-tags">';
         foreach($assigned as $ar) echo '<span class="pill">'.h($ar['nombre']).'</span> ';
-        echo '</div></td><td>'.($x['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>').'</td><td><button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-edit-'.$x['id'].'\&quot;).showModal()">Editar</button> <button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-password-'.$x['id'].'\&quot;).showModal()">Contraseña</button></td></tr>';
+        echo '</div></td><td>'.($x['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>').'</td><td><button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-edit-'.$x['id'].'\&quot;).showModal()">Editar</button> <button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-password-'.$x['id'].'\&quot;).showModal()">Contraseña</button> '.((int)$x['id']!==(int)current_user()['id']?'<form method="post" style="display:inline" onsubmit="return confirm(\&quot;¿Eliminar este usuario? Esta acción no se puede deshacer.\&quot;)"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="'.$x['id'].'"><button type="submit" class="btn red">Eliminar</button></form>':'').'</td></tr>';
     }
     echo '</table></div>';
     foreach($users as $x){
