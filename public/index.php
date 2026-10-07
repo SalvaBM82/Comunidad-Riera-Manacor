@@ -21,7 +21,7 @@ function layout_start($title){
     $u=current_user();
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
     <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h($u['rol_nombre']??role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
-    <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><a href="index.php?page=unidades">Unidades</a><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
+    <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><?php if(can('GESTION_UNIDADES')): ?><a href="index.php?page=unidades">Unidades</a><?php endif; ?><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
     <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
     </aside><main class="main"><?php
 }
@@ -47,22 +47,91 @@ break;
 
 case 'unidades':
     if(!can('GESTION_UNIDADES')){echo '<div class="alert">No tienes permiso para gestionar unidades.</div>';break;}
-    echo '<h1>Unidades</h1><table><tr><th>Unidad</th><th>Propietario</th><th>General</th><th>Escalera</th><th>Acceso</th></tr>';
-    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<tr><td>'.h($x['nombre']).'</td><td>'.h($x['propietario']).'</td><td>'.$x['coef_general'].'%</td><td>'.$x['coef_escalera'].'%</td><td>'.($x['tiene_acceso_escalera']?'Sí':'No').'</td></tr>';
-    echo '</table>';
+
+    $unitError='';
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        $action=$_POST['action']??'';
+        try{
+            if($action==='create_unit'){
+                $nombre=trim($_POST['nombre']??'');
+                $propietario=trim($_POST['propietario']??'');
+                $email=trim($_POST['email']??'');
+                $telefono=trim($_POST['telefono']??'');
+                $coefGeneral=(float)($_POST['coef_general']??0);
+                $coefEscalera=(float)($_POST['coef_escalera']??0);
+                $acceso=isset($_POST['tiene_acceso_escalera'])?1:0;
+                $m2=($_POST['m2']??'')===''?null:(float)$_POST['m2'];
+                if($nombre==='' || $propietario==='' || $coefGeneral<0 || $coefGeneral>100 || $coefEscalera<0 || $coefEscalera>100 || ($m2!==null && $m2<0)) throw new Exception('Revisa los datos de la unidad y los coeficientes.');
+                if($email!=='' && !filter_var($email,FILTER_VALIDATE_EMAIL)) throw new Exception('El email no es válido.');
+                $pdo->prepare("INSERT INTO unidades(nombre,propietario,email,telefono,coef_general,coef_escalera,tiene_acceso_escalera,m2) VALUES(?,?,?,?,?,?,?,?)")
+                    ->execute([$nombre,$propietario,$email?:null,$telefono?:null,$coefGeneral,$coefEscalera,$acceso,$m2]);
+                log_action('Creó unidad '.$nombre,'unidades'); header('Location:index.php?page=unidades');exit;
+            }
+            if($action==='update_unit'){
+                $id=(int)$_POST['id'];
+                $nombre=trim($_POST['nombre']??''); $propietario=trim($_POST['propietario']??'');
+                $email=trim($_POST['email']??''); $telefono=trim($_POST['telefono']??'');
+                $coefGeneral=(float)($_POST['coef_general']??0); $coefEscalera=(float)($_POST['coef_escalera']??0);
+                $acceso=isset($_POST['tiene_acceso_escalera'])?1:0;
+                $m2=($_POST['m2']??'')===''?null:(float)$_POST['m2'];
+                if(!$id || $nombre==='' || $propietario==='' || $coefGeneral<0 || $coefGeneral>100 || $coefEscalera<0 || $coefEscalera>100 || ($m2!==null && $m2<0)) throw new Exception('Revisa los datos de la unidad y los coeficientes.');
+                if($email!=='' && !filter_var($email,FILTER_VALIDATE_EMAIL)) throw new Exception('El email no es válido.');
+                $pdo->prepare("UPDATE unidades SET nombre=?,propietario=?,email=?,telefono=?,coef_general=?,coef_escalera=?,tiene_acceso_escalera=?,m2=? WHERE id=?")
+                    ->execute([$nombre,$propietario,$email?:null,$telefono?:null,$coefGeneral,$coefEscalera,$acceso,$m2,$id]);
+                log_action('Actualizó unidad #'.$id,'unidades'); header('Location:index.php?page=unidades');exit;
+            }
+            if($action==='delete_unit'){
+                $id=(int)$_POST['id'];
+                foreach([
+                    ['usuarios','unidad_id=?'],['recibos','unidad_id=?'],['votos','unidad_id=?'],['propietarios_historial','unidad_id=?']
+                ] as [$table,$where]){
+                    $st=$pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE {$where}"); $st->execute([$id]);
+                    if((int)$st->fetchColumn()>0) throw new Exception('No se puede borrar la unidad porque tiene datos históricos o relacionados.');
+                }
+                $st=$pdo->prepare("SELECT COUNT(*) FROM adelantos WHERE deudor_id=? OR acreedor_id=?"); $st->execute([$id,$id]);
+                if((int)$st->fetchColumn()>0) throw new Exception('No se puede borrar la unidad porque tiene adelantos relacionados.');
+                $pdo->prepare("DELETE FROM unidades WHERE id=?")->execute([$id]);
+                log_action('Borró unidad #'.$id,'unidades'); header('Location:index.php?page=unidades');exit;
+            }
+        }catch(Throwable $e){$unitError=$e->getMessage();}
+    }
+    if($unitError) echo '<div class="alert">'.h($unitError).'</div>';
+    $editId=(int)($_GET['edit']??0); $editUnit=null;
+    if($editId){$st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$editId]);$editUnit=$st->fetch();if(!$editUnit)$editId=0;}
+
+    echo '<h1>Unidades</h1><div class="card"><h2>'.($editUnit?'Editar unidad':'Nueva unidad').'</h2><form method="post" class="form">';
+    echo '<input type="hidden" name="action" value="'.($editUnit?'update_unit':'create_unit').'">'.($editUnit?'<input type="hidden" name="id" value="'.$editUnit['id'].'">':'');
+    echo '<label>Nombre</label><input name="nombre" value="'.h($editUnit['nombre']??'').'" required>';
+    echo '<label>Propietario</label><input name="propietario" value="'.h($editUnit['propietario']??'').'" required>';
+    echo '<label>Email</label><input type="email" name="email" value="'.h($editUnit['email']??'').'">';
+    echo '<label>Teléfono</label><input name="telefono" value="'.h($editUnit['telefono']??'').'">';
+    echo '<label>Coeficiente GENERAL (%)</label><input type="number" step="0.001" min="0" max="100" name="coef_general" value="'.h($editUnit['coef_general']??'0').'" required>';
+    echo '<label>Coeficiente ESCALERA (%)</label><input type="number" step="0.001" min="0" max="100" name="coef_escalera" value="'.h($editUnit['coef_escalera']??'0').'" required>';
+    echo '<label><input type="checkbox" name="tiene_acceso_escalera"'.(!empty($editUnit['tiene_acceso_escalera'])?' checked':'').'> Tiene acceso a escalera</label>';
+    echo '<label>m²</label><input type="number" step="0.01" min="0" name="m2" value="'.h($editUnit['m2']??'').'">';
+    echo '<br><button class="btn">'.($editUnit?'Guardar cambios':'Crear unidad').'</button>'.($editUnit?' <a class="btn gray" href="index.php?page=unidades">Cancelar</a>':'').'</form></div><br>';
+    echo '<div class="card"><h2>Unidades existentes</h2><p class="muted">Las unidades con recibos, propietarios históricos, votos, usuarios o adelantos relacionados no se pueden borrar para evitar pérdida de información.</p>';
+    echo '<table><tr><th>Unidad</th><th>Propietario</th><th>General</th><th>Escalera</th><th>Acceso</th><th>m²</th><th>Acciones</th></tr>';
+    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x){
+        echo '<tr><td>'.h($x['nombre']).'</td><td>'.h($x['propietario']).'</td><td>'.$x['coef_general'].'%</td><td>'.$x['coef_escalera'].'%</td><td>'.($x['tiene_acceso_escalera']?'Sí':'No').'</td><td>'.h($x['m2']??'').'</td><td>';
+        echo '<a class="btn gray" href="index.php?page=unidades&edit='.$x['id'].'">Editar</a> ';
+        echo '<form method="post" style="display:inline" onsubmit="return confirm(\'¿Borrar esta unidad? Esta acción no se puede deshacer.\')"><input type="hidden" name="action" value="delete_unit"><input type="hidden" name="id" value="'.$x['id'].'"><button class="btn gray" type="submit">Borrar</button></form>';
+        echo '</td></tr>';
+    }
+    echo '</table></div>';
 break;
 
 case 'gastos':
     if(can('GESTION_GASTOS') && $_SERVER['REQUEST_METHOD']==='POST'){
-        $pdo->prepare("INSERT INTO gastos(fecha,concepto,proveedor,importe_total,tipo_gasto,pagado,created_by) VALUES(?,?,?,?,?,?,?)")
-            ->execute([$_POST['fecha'],$_POST['concepto'],$_POST['proveedor'],$_POST['importe'],$_POST['tipo'],isset($_POST['pagado'])?1:0,current_user()['id']]);
+        $pdo->prepare("INSERT INTO gastos(fecha,concepto,proveedor,importe_total,tipo_gasto,factura_url,pagado,created_by) VALUES(?,?,?,?,?,?,?,?)")
+            ->execute([$_POST['fecha'],$_POST['concepto'],$_POST['proveedor'],$_POST['importe'],$_POST['tipo'],trim($_POST['factura_url']??'')?:null,isset($_POST['pagado'])?1:0,current_user()['id']]);
         log_action('Creó gasto','gastos'); header('Location:index.php?page=gastos'); exit;
     }
     echo '<h1>Gastos</h1>';
-    if(can('GESTION_GASTOS')) echo '<form method="post" class="form"><label>Fecha</label><input type="date" name="fecha" required><label>Concepto</label><input name="concepto" required><label>Proveedor</label><input name="proveedor"><label>Importe</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label><input type="checkbox" name="pagado"> Pagado</label><br><button class="btn">Guardar gasto</button></form><br>';
+    if(can('GESTION_GASTOS')) echo '<form method="post" class="form"><label>Fecha</label><input type="date" name="fecha" required><label>Concepto</label><input name="concepto" required><label>Proveedor</label><input name="proveedor"><label>Enlace externo de factura/documento</label><input type="url" name="factura_url" placeholder="https://..."><label>Importe</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label><input type="checkbox" name="pagado"> Pagado</label><br><button class="btn">Guardar gasto</button></form><br>';
     $rows=$pdo->query("SELECT g.*,u.email FROM gastos g LEFT JOIN usuarios u ON u.id=g.created_by ORDER BY g.fecha DESC,g.id DESC")->fetchAll();
-    echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Estado</th></tr>';
-    foreach($rows as $x) echo '<tr><td>'.h($x['fecha']).'</td><td>'.h($x['concepto']).'</td><td>'.h($x['proveedor']).'</td><td><span class="pill">'.h($x['tipo_gasto']).'</span></td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.($x['pagado']?'Pagado':'Pendiente').'</td></tr>';
+    echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Factura/documento</th><th>Estado</th></tr>';
+    foreach($rows as $x) echo '<tr><td>'.h($x['fecha']).'</td><td>'.h($x['concepto']).'</td><td>'.h($x['proveedor']).'</td><td><span class="pill">'.h($x['tipo_gasto']).'</span></td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.(!empty($x['factura_url'])?'<a href="'.h($x['factura_url']).'" target="_blank" rel="noopener noreferrer">Abrir</a>':'—').'</td><td>'.($x['pagado']?'Pagado':'Pendiente').'</td></tr>';
     echo '</table>';
 break;
 
@@ -133,7 +202,49 @@ case 'incidencias':
 break;
 
 case 'documentos':
-    echo '<h1>Documentos</h1><div class="card"><p>Repositorio preparado para actas, estatutos, seguros y facturas.</p><p class="muted">La estructura SQL y el almacenamiento están incluidos en esta versión inicial.</p></div>';
+    $docError='';
+    if($_SERVER['REQUEST_METHOD']==='POST' && can('GESTION_DOCUMENTOS')){
+        try{
+            $action=$_POST['action']??'';
+            if($action==='create_document' || $action==='update_document'){
+                $id=(int)($_POST['id']??0);
+                $titulo=trim($_POST['titulo']??''); $categoria=trim($_POST['categoria']??''); $url=trim($_POST['archivo_url']??'');
+                if($titulo==='' || !external_url($url)) throw new Exception('Indica un título y un enlace externo válido (http:// o https://).');
+                if($action==='create_document'){
+                    $pdo->prepare("INSERT INTO documentos(titulo,categoria,archivo_url,created_by) VALUES(?,?,?,?)")->execute([$titulo,$categoria?:null,$url,current_user()['id']]);
+                    log_action('Creó enlace documental','documentos');
+                }else{
+                    $pdo->prepare("UPDATE documentos SET titulo=?,categoria=?,archivo_url=? WHERE id=?")->execute([$titulo,$categoria?:null,$url,$id]);
+                    log_action('Actualizó enlace documental #'.$id,'documentos');
+                }
+                header('Location:index.php?page=documentos');exit;
+            }
+            if($action==='delete_document'){
+                $id=(int)$_POST['id']; $pdo->prepare("DELETE FROM documentos WHERE id=?")->execute([$id]);
+                log_action('Borró enlace documental #'.$id,'documentos'); header('Location:index.php?page=documentos');exit;
+            }
+        }catch(Throwable $e){$docError=$e->getMessage();}
+    }
+    if($docError) echo '<div class="alert">'.h($docError).'</div>';
+    $editDoc=null; $editDocId=(int)($_GET['edit']??0);
+    if($editDocId && can('GESTION_DOCUMENTOS')){$st=$pdo->prepare("SELECT * FROM documentos WHERE id=?");$st->execute([$editDocId]);$editDoc=$st->fetch();}
+    echo '<h1>Documentos</h1><p class="muted">Los documentos se gestionan mediante enlaces externos. No se almacenan archivos en el servidor.</p>';
+    if(can('GESTION_DOCUMENTOS')){
+        echo '<div class="card"><h2>'.($editDoc?'Editar enlace':'Nuevo enlace documental').'</h2><form method="post" class="form">';
+        echo '<input type="hidden" name="action" value="'.($editDoc?'update_document':'create_document').'">'.($editDoc?'<input type="hidden" name="id" value="'.$editDoc['id'].'">':'');
+        echo '<label>Título</label><input name="titulo" value="'.h($editDoc['titulo']??'').'" required>';
+        echo '<label>Categoría</label><input name="categoria" value="'.h($editDoc['categoria']??'').'" placeholder="Acta, estatutos, seguro, factura...">';
+        echo '<label>Enlace externo</label><input type="url" name="archivo_url" value="'.h($editDoc['archivo_url']??'').'" placeholder="https://..." required>';
+        echo '<br><button class="btn">'.($editDoc?'Guardar cambios':'Añadir enlace').'</button>'.($editDoc?' <a class="btn gray" href="index.php?page=documentos">Cancelar</a>':'').'</form></div><br>';
+    }
+    $docs=$pdo->query("SELECT d.*,u.email FROM documentos d LEFT JOIN usuarios u ON u.id=d.created_by ORDER BY d.created_at DESC,d.id DESC")->fetchAll();
+    echo '<div class="card"><h2>Enlaces documentales</h2><table><tr><th>Título</th><th>Categoría</th><th>Enlace</th><th>Fecha</th>'.(can('GESTION_DOCUMENTOS')?'<th>Acciones</th>':'').'</tr>';
+    foreach($docs as $d){
+        echo '<tr><td>'.h($d['titulo']).'</td><td>'.h($d['categoria']??'').'</td><td><a href="'.h($d['archivo_url']).'" target="_blank" rel="noopener noreferrer">Abrir documento</a></td><td>'.h($d['created_at']).'</td>';
+        if(can('GESTION_DOCUMENTOS')) echo '<td><a class="btn gray" href="index.php?page=documentos&edit='.$d['id'].'">Editar</a> <form method="post" style="display:inline" onsubmit="return confirm(\'¿Borrar este enlace?\')"><input type="hidden" name="action" value="delete_document"><input type="hidden" name="id" value="'.$d['id'].'"><button class="btn gray">Borrar</button></form></td>';
+        echo '</tr>';
+    }
+    echo '</table></div>';
 break;
 
 case 'votaciones':
@@ -288,7 +399,7 @@ case 'roles':
             if($role && $nombre){
                 if($role['codigo']==='PRESIDENTE'){$activo=1;}
                 if(!$activo){
-                    $st=$pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE rol_id=? AND activo=1");
+                    $st=$pdo->prepare("SELECT COUNT(*) FROM usuario_roles ur JOIN usuarios u ON u.id=ur.usuario_id WHERE ur.rol_id=? AND u.activo=1");
                     $st->execute([$rid]);
                     if((int)$st->fetchColumn()>0){
                         echo '<div class="alert">No se puede desactivar este rol porque hay usuarios activos asignados a él. Cambia primero esos usuarios a otro rol.</div>';
