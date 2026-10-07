@@ -49,15 +49,25 @@ function current_user() {
         $rs->execute([$id]);
         $roles=$rs->fetchAll();
 
-        if (!$roles) {
-            // Compatibilidad durante la transición: si V4 aún no se ha ejecutado,
-            // se conserva el rol único de V3.
-            if (!empty($row['rol_id'])) {
-                $rs=$pdo->prepare("SELECT id,codigo,nombre,activo FROM roles WHERE id=?");
-                $rs->execute([(int)$row['rol_id']]);
-                $legacy=$rs->fetch();
-                if ($legacy) $roles=[$legacy];
+        // Compatibilidad y sincronización con el modelo antiguo de rol único.
+        // Si el usuario conserva rol_id/rol de V3, ese rol también debe contar
+        // aunque ya tenga otros roles asignados en usuario_roles.
+        if (!empty($row['rol_id'])) {
+            $rsLegacy=$pdo->prepare("SELECT id,codigo,nombre,activo FROM roles WHERE id=? AND activo=1 LIMIT 1");
+            $rsLegacy->execute([(int)$row['rol_id']]);
+            $legacy=$rsLegacy->fetch();
+            if ($legacy) {
+                $roleIds=array_map('intval',array_column($roles,'id'));
+                if (!in_array((int)$legacy['id'],$roleIds,true)) $roles[]=$legacy;
             }
+        }
+
+        // Último fallback: el campo textual rol de V3/V2.
+        if (!$roles && !empty($row['rol'])) {
+            $rsLegacy=$pdo->prepare("SELECT id,codigo,nombre,activo FROM roles WHERE codigo=? AND activo=1 LIMIT 1");
+            $rsLegacy->execute([$row['rol']]);
+            $legacy=$rsLegacy->fetch();
+            if ($legacy) $roles=[$legacy];
         }
 
         $row['roles']=$roles;
@@ -105,15 +115,28 @@ function has_role($code) {
     return $u && in_array($code,$u['role_codes']??[],true);
 }
 
+function has_role_id($id,$code) {
+    global $pdo;
+    try {
+        $st=$pdo->prepare("SELECT 1 FROM roles WHERE id=? AND codigo=? AND activo=1 LIMIT 1");
+        $st->execute([(int)$id,$code]);
+        return (bool)$st->fetchColumn();
+    } catch(Throwable $e) {
+        return false;
+    }
+}
+
 function can($permission) {
     global $pdo;
     $u=current_user();
     if (!$u) return false;
 
-    // El Administrador es el rol de administración web. Tiene acceso completo
-    // independientemente de cómo se hayan cargado los permisos en la migración.
-    // El Presidente NO recibe este trato: sus permisos son configurables.
-    if (has_role('ADMINISTRADOR')) return true;
+    // El Administrador es el rol de administración web. Se reconoce tanto
+    // desde los roles N:M como desde los campos legacy de V3/V2.
+    $adminRole = has_role('ADMINISTRADOR')
+        || (($u['rol'] ?? '') === 'ADMINISTRADOR')
+        || ((int)($u['rol_id'] ?? 0) > 0 && has_role_id($u['rol_id'], 'ADMINISTRADOR'));
+    if ($adminRole) return true;
 
     try {
         $st=$pdo->prepare("SELECT 1
