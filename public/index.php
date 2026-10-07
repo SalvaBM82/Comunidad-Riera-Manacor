@@ -112,6 +112,120 @@ function layout_start($title){
 }
 function layout_end(){ ?></main></div></body></html><?php }
 
+// Procesar Usuarios antes de renderizar HTML: permite redirects y evita problemas de headers.
+if($page==='usuarios' && $_SERVER['REQUEST_METHOD']==='POST'){
+    if(!can('GESTION_USUARIOS')){http_response_code(403);exit('No tienes permiso para gestionar usuarios.');}
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        $action=$_POST['action']??'';
+
+        if($action==='create'){
+            $email=trim($_POST['email']??'');
+            $password=$_POST['password']??'';
+            $unidad=(int)($_POST['unidad_id']??0);
+            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
+
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($password)<8 || !$roles){
+                echo '<div class="alert">Email, al menos un rol y una contraseña de 8 caracteres son obligatorios.</div>';
+            } else {
+                try{
+                    $pdo->beginTransaction();
+                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
+                    $valid->execute($roles);
+                    $validRoles=$valid->fetchAll();
+                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
+
+                    $primary=$validRoles[0];
+                    foreach($validRoles as $vr){
+                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
+                    }
+
+                    $pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol,rol_id,activo) VALUES(?,?,?,?,?,1)")
+                        ->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$primary['codigo'],$primary['id']]);
+                    $uid=(int)$pdo->lastInsertId();
+
+                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
+                    foreach($validRoles as $vr) $ins->execute([$uid,$vr['id']]);
+
+                    $pdo->commit();
+                    log_action('Creó usuario','usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo crear el usuario: '.h($e->getMessage()).'</div>';
+                }
+            }
+        } elseif($action==='update'){
+            $id=(int)$_POST['id'];
+            $email=trim($_POST['email']??'');
+            $unidad=(int)($_POST['unidad_id']??0);
+            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
+            $activo=isset($_POST['activo'])?1:0;
+            if($id===(int)current_user()['id']) $activo=1;
+
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || !$roles){
+                echo '<div class="alert">Email y al menos un rol son obligatorios.</div>';
+            } else {
+                try{
+                    $pdo->beginTransaction();
+                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
+                    $valid->execute($roles);
+                    $validRoles=$valid->fetchAll();
+                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
+
+                    $primary=$validRoles[0];
+                    foreach($validRoles as $vr){
+                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
+                    }
+
+                    $pdo->prepare("UPDATE usuarios SET email=?,unidad_id=?,rol=?,rol_id=?,activo=? WHERE id=?")
+                        ->execute([$email,$unidad?:null,$primary['codigo'],$primary['id'],$activo,$id]);
+
+                    $pdo->prepare("DELETE FROM usuario_roles WHERE usuario_id=?")->execute([$id]);
+                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
+                    foreach($validRoles as $vr) $ins->execute([$id,$vr['id']]);
+
+                    $pdo->commit();
+                    log_action('Actualizó usuario #'.$id,'usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo actualizar el usuario: '.h($e->getMessage()).'</div>';
+                }
+            }
+        } elseif($action==='delete'){
+            $id=(int)($_POST['id']??0);
+            if(!$id){
+                echo '<div class="alert">Usuario no válido.</div>';
+            } elseif($id===(int)current_user()['id']){
+                echo '<div class="alert">No puedes eliminar tu propio usuario.</div>';
+            } else {
+                try{
+                    $st=$pdo->prepare("SELECT id,email FROM usuarios WHERE id=?");
+                    $st->execute([$id]);
+                    $target=$st->fetch();
+                    if(!$target) throw new Exception('El usuario no existe.');
+                    $pdo->beginTransaction();
+                    $pdo->prepare("DELETE FROM usuarios WHERE id=?")->execute([$id]);
+                    $pdo->commit();
+                    log_action('Eliminó usuario #'.$id.' ('.($target['email']??'').')','usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo eliminar el usuario: '.h($e->getMessage()).'</div>';
+                }
+            }
+        } elseif($action==='password'){
+            $id=(int)$_POST['id'];$password=$_POST['password']??'';
+            if(strlen($password)>=8){
+                $pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")
+                    ->execute([password_hash($password,PASSWORD_DEFAULT),$id]);
+                log_action('Cambió contraseña de usuario #'.$id,'usuarios');
+            }
+            header('Location:index.php?page=usuarios');exit;
+        }
+    }
+}
+
 layout_start(ucfirst($page));
 
 if(isset($_GET['docs_tipo'],$_GET['docs_id'])){
@@ -430,116 +544,6 @@ case 'usuarios':
     if(!can('GESTION_USUARIOS')){echo '<div class="alert">No tienes permiso para gestionar usuarios.</div>';break;}
 
     $activeRoles=$pdo->query("SELECT id,codigo,nombre FROM roles WHERE activo=1 ORDER BY sistema DESC,nombre")->fetchAll();
-    if($_SERVER['REQUEST_METHOD']==='POST'){
-        $action=$_POST['action']??'';
-
-        if($action==='create'){
-            $email=trim($_POST['email']??'');
-            $password=$_POST['password']??'';
-            $unidad=(int)($_POST['unidad_id']??0);
-            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
-
-            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($password)<8 || !$roles){
-                echo '<div class="alert">Email, al menos un rol y una contraseña de 8 caracteres son obligatorios.</div>';
-            } else {
-                try{
-                    $pdo->beginTransaction();
-                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
-                    $valid->execute($roles);
-                    $validRoles=$valid->fetchAll();
-                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
-
-                    $primary=$validRoles[0];
-                    foreach($validRoles as $vr){
-                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
-                    }
-
-                    $pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol,rol_id,activo) VALUES(?,?,?,?,?,1)")
-                        ->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$primary['codigo'],$primary['id']]);
-                    $uid=(int)$pdo->lastInsertId();
-
-                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
-                    foreach($validRoles as $vr) $ins->execute([$uid,$vr['id']]);
-
-                    $pdo->commit();
-                    log_action('Creó usuario','usuarios');
-                    header('Location:index.php?page=usuarios');exit;
-                }catch(Throwable $e){
-                    if($pdo->inTransaction()) $pdo->rollBack();
-                    echo '<div class="alert">No se pudo crear el usuario: '.h($e->getMessage()).'</div>';
-                }
-            }
-        } elseif($action==='update'){
-            $id=(int)$_POST['id'];
-            $email=trim($_POST['email']??'');
-            $unidad=(int)($_POST['unidad_id']??0);
-            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
-            $activo=isset($_POST['activo'])?1:0;
-            if($id===(int)current_user()['id']) $activo=1;
-
-            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || !$roles){
-                echo '<div class="alert">Email y al menos un rol son obligatorios.</div>';
-            } else {
-                try{
-                    $pdo->beginTransaction();
-                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
-                    $valid->execute($roles);
-                    $validRoles=$valid->fetchAll();
-                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
-
-                    $primary=$validRoles[0];
-                    foreach($validRoles as $vr){
-                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
-                    }
-
-                    $pdo->prepare("UPDATE usuarios SET email=?,unidad_id=?,rol=?,rol_id=?,activo=? WHERE id=?")
-                        ->execute([$email,$unidad?:null,$primary['codigo'],$primary['id'],$activo,$id]);
-
-                    $pdo->prepare("DELETE FROM usuario_roles WHERE usuario_id=?")->execute([$id]);
-                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
-                    foreach($validRoles as $vr) $ins->execute([$id,$vr['id']]);
-
-                    $pdo->commit();
-                    log_action('Actualizó usuario #'.$id,'usuarios');
-                    header('Location:index.php?page=usuarios');exit;
-                }catch(Throwable $e){
-                    if($pdo->inTransaction()) $pdo->rollBack();
-                    echo '<div class="alert">No se pudo actualizar el usuario: '.h($e->getMessage()).'</div>';
-                }
-            }
-        } elseif($action==='delete'){
-            $id=(int)($_POST['id']??0);
-            if(!$id){
-                echo '<div class="alert">Usuario no válido.</div>';
-            } elseif($id===(int)current_user()['id']){
-                echo '<div class="alert">No puedes eliminar tu propio usuario.</div>';
-            } else {
-                try{
-                    $st=$pdo->prepare("SELECT id,email FROM usuarios WHERE id=?");
-                    $st->execute([$id]);
-                    $target=$st->fetch();
-                    if(!$target) throw new Exception('El usuario no existe.');
-                    $pdo->beginTransaction();
-                    $pdo->prepare("DELETE FROM usuarios WHERE id=?")->execute([$id]);
-                    $pdo->commit();
-                    log_action('Eliminó usuario #'.$id.' ('.($target['email']??'').')','usuarios');
-                    header('Location:index.php?page=usuarios');exit;
-                }catch(Throwable $e){
-                    if($pdo->inTransaction()) $pdo->rollBack();
-                    echo '<div class="alert">No se pudo eliminar el usuario: '.h($e->getMessage()).'</div>';
-                }
-            }
-        } elseif($action==='password'){
-            $id=(int)$_POST['id'];$password=$_POST['password']??'';
-            if(strlen($password)>=8){
-                $pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")
-                    ->execute([password_hash($password,PASSWORD_DEFAULT),$id]);
-                log_action('Cambió contraseña de usuario #'.$id,'usuarios');
-            }
-            header('Location:index.php?page=usuarios');exit;
-        }
-    }
-
     echo '<div class="section-head"><h1>Usuarios</h1><button type="button" class="btn" onclick="document.getElementById(\&quot;user-create-modal\&quot;).showModal()">+ Nuevo usuario</button></div>';
     echo '<dialog id="user-create-modal" class="app-modal"><div class="modal-head"><h2>Nuevo usuario</h2><button type="button" class="modal-close" onclick="this.closest(\&quot;dialog\&quot;).close()">×</button></div><div class="modal-body"><form method="post" action="index.php?page=usuarios" class="modal-form"><input type="hidden" name="action" value="create"><div class="form-grid-2"><div><label>Email</label><input type="email" name="email" required></div><div><label>Contraseña inicial</label><input type="password" name="password" minlength="8" required></div><div><label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
     foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
@@ -556,7 +560,7 @@ case 'usuarios':
         $assignedIds=array_map('intval',array_column($assigned,'id'));
         echo '<tr><td>'.h($x['email']).'</td><td>'.h($x['unidad_nombre']??'Sin unidad').'</td><td><div class="role-tags">';
         foreach($assigned as $ar) echo '<span class="pill">'.h($ar['nombre']).'</span> ';
-        echo '</div></td><td>'.($x['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>').'</td><td><button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-edit-'.$x['id'].'\&quot;).showModal()">Editar</button> <button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-password-'.$x['id'].'\&quot;).showModal()">Contraseña</button> '.((int)$x['id']!==(int)current_user()['id']?'<form method="post" style="display:inline" onsubmit="return confirm(\&quot;¿Eliminar este usuario? Esta acción no se puede deshacer.\&quot;)"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="'.$x['id'].'"><button type="submit" class="btn red">Eliminar</button></form>':'').'</td></tr>';
+        echo '</div></td><td>'.($x['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>').'</td><td><button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-edit-'.$x['id'].'\&quot;).showModal()">Editar</button> <button type="button" class="btn gray" onclick="document.getElementById(\&quot;user-password-'.$x['id'].'\&quot;).showModal()">Contraseña</button> '.((int)$x['id']!==(int)current_user()['id']?'<form method="post" action="index.php?page=usuarios" style="display:inline" onsubmit="return confirm(\&quot;¿Eliminar este usuario? Esta acción no se puede deshacer.\&quot;)"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="'.$x['id'].'"><button type="submit" class="btn red">Eliminar</button></form>':'').'</td></tr>';
     }
     echo '</table></div>';
     foreach($users as $x){
