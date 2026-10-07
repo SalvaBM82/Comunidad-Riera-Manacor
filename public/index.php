@@ -22,7 +22,7 @@ function layout_start($title){
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
     <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h(role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
     <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><a href="index.php?page=unidades">Unidades</a><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
-    <div class="nav-title">Administración</div><?php if(is_president()): ?><a href="index.php?page=usuarios">Usuarios y roles</a><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
+    <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
     </aside><main class="main"><?php
 }
 function layout_end(){ ?></main></div></body></html><?php }
@@ -142,49 +142,131 @@ break;
 
 
 case 'usuarios':
-    if(!is_president()){echo '<div class="alert">Solo el Presidente puede gestionar usuarios.</div>';break;}
+    if(!can('GESTION_USUARIOS')){echo '<div class="alert">No tienes permiso para gestionar usuarios.</div>';break;}
     if($_SERVER['REQUEST_METHOD']==='POST'){
         $action=$_POST['action']??'';
         if($action==='create'){
-            $email=trim($_POST['email']); $password=$_POST['password']; $unidad=(int)$_POST['unidad_id'];
-            $rol=$_POST['rol']; $allowed=['PRESIDENTE','PROPIETARIO_ESCALERA','PROPIETARIO_SIN_ESCALERA'];
-            if(!in_array($rol,$allowed,true) || !$email || strlen($password)<8){echo '<div class="alert">Email, rol y contraseña de al menos 8 caracteres son obligatorios.</div>';}
-            else {
-                try{$pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol) VALUES(?,?,?,?)")->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$rol]);log_action('Creó usuario','usuarios');header('Location:index.php?page=usuarios');exit;}
-                catch(PDOException $e){echo '<div class="alert">No se pudo crear el usuario. Comprueba que el email no esté ya registrado.</div>';}
+            $email=trim($_POST['email']??'');
+            $password=$_POST['password']??'';
+            $unidad=(int)($_POST['unidad_id']??0);
+            $rol=trim($_POST['rol']??'');
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($password)<8 || !$rol){
+                echo '<div class="alert">Email, rol y contraseña de al menos 8 caracteres son obligatorios.</div>';
+            } else {
+                try {
+                    $pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol,rol_id,activo)
+                        SELECT ?,?,?,r.codigo,r.id,1 FROM roles r WHERE r.codigo=? AND r.activo=1")
+                        ->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$rol]);
+                    if($pdo->lastInsertId()){ log_action('Creó usuario','usuarios'); header('Location:index.php?page=usuarios'); exit; }
+                    echo '<div class="alert">El rol seleccionado no existe o está inactivo.</div>';
+                } catch(PDOException $e) {
+                    echo '<div class="alert">No se pudo crear el usuario. Comprueba que el email no esté ya registrado.</div>';
+                }
             }
         } elseif($action==='update'){
-            $id=(int)$_POST['id']; $rol=$_POST['rol']; $unidad=(int)$_POST['unidad_id']; $activo=isset($_POST['activo'])?1:0;
+            $id=(int)$_POST['id'];
+            $email=trim($_POST['email']??'');
+            $unidad=(int)($_POST['unidad_id']??0);
+            $rol=trim($_POST['rol']??'');
+            $activo=isset($_POST['activo'])?1:0;
             if($id===(int)current_user()['id']) $activo=1;
-            $allowed=['PRESIDENTE','PROPIETARIO_ESCALERA','PROPIETARIO_SIN_ESCALERA'];
-            if(in_array($rol,$allowed,true)){
-                $pdo->prepare("UPDATE usuarios SET rol=?,unidad_id=?,activo=? WHERE id=?")->execute([$rol,$unidad?:null,$activo,$id]);
-                log_action('Actualizó usuario #'.$id,'usuarios');
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || !$rol){echo '<div class="alert">Email y rol son obligatorios.</div>';}
+            else {
+                try {
+                    $pdo->prepare("UPDATE usuarios u JOIN roles r ON r.codigo=? AND r.activo=1
+                        SET u.email=?,u.unidad_id=?,u.rol=r.codigo,u.rol_id=r.id,u.activo=? WHERE u.id=?")
+                        ->execute([$rol,$email,$unidad?:null,$activo,$id]);
+                    log_action('Actualizó usuario #'.$id,'usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                } catch(PDOException $e) {
+                    echo '<div class="alert">No se pudo actualizar el usuario. Comprueba que el email no esté duplicado.</div>';
+                }
             }
-            header('Location:index.php?page=usuarios');exit;
         } elseif($action==='password'){
-            $id=(int)$_POST['id']; $password=$_POST['password'];
-            if(strlen($password)>=8){$pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$id]);log_action('Cambió contraseña de usuario #'.$id,'usuarios');}
+            $id=(int)$_POST['id']; $password=$_POST['password']??'';
+            if(strlen($password)>=8){
+                $pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$id]);
+                log_action('Cambió contraseña de usuario #'.$id,'usuarios');
+            }
             header('Location:index.php?page=usuarios');exit;
         }
     }
-    echo '<h1>Usuarios y roles</h1>';
-    echo '<div class="card"><h2>Nuevo usuario</h2><form method="post" class="form"><input type="hidden" name="action" value="create"><label>Email</label><input type="email" name="email" required><label>Contraseña inicial</label><input type="password" name="password" minlength="8" required><label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
-    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).'</option>';
-    echo '</select><label>Rol</label><select name="rol"><option value="PROPIETARIO_SIN_ESCALERA">Propietario sin escalera</option><option value="PROPIETARIO_ESCALERA">Propietario con escalera</option><option value="PRESIDENTE">Presidente</option></select><br><button class="btn">Crear usuario</button></form></div><br>';
-    $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id ORDER BY u.id")->fetchAll();
-    echo '<table><tr><th>Email</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Gestión</th></tr>';
+
+    echo '<h1>Usuarios</h1>';
+    echo '<div class="card"><h2>Nuevo usuario</h2><form method="post" class="form">
+        <input type="hidden" name="action" value="create">
+        <label>Email</label><input type="email" name="email" required>
+        <label>Contraseña inicial</label><input type="password" name="password" minlength="8" required>
+        <label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
+    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
+    echo '</select><label>Rol</label><select name="rol">';
+    foreach($pdo->query("SELECT codigo,nombre FROM roles WHERE activo=1 ORDER BY nombre") as $r) echo '<option value="'.h($r['codigo']).'">'.h($r['nombre']).'</option>';
+    echo '</select><br><button class="btn">Crear usuario</button></form></div><br>';
+
+    $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre,r.nombre rol_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id LEFT JOIN roles r ON r.codigo=u.rol ORDER BY u.id")->fetchAll();
+    echo '<div class="card"><h2>Usuarios existentes</h2><table><tr><th>Email</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Guardar</th><th>Contraseña</th></tr>';
     foreach($users as $x){
-        echo '<tr><td>'.h($x['email']).'</td><td>'.h($x['unidad_nombre']??'Sin unidad').'</td><td><form method="post" style="display:inline"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><select name="rol"><option value="PRESIDENTE"'.($x['rol']==='PRESIDENTE'?' selected':'').'>Presidente</option><option value="PROPIETARIO_ESCALERA"'.($x['rol']==='PROPIETARIO_ESCALERA'?' selected':'').'>Propietario con escalera</option><option value="PROPIETARIO_SIN_ESCALERA"'.($x['rol']==='PROPIETARIO_SIN_ESCALERA'?' selected':'').'>Propietario sin escalera</option></select><br><select name="unidad_id"><option value="0">Sin unidad</option>';
+        echo '<tr><td><form method="post" class="form"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><input type="email" name="email" value="'.h($x['email']).'" required></td><td><select name="unidad_id"><option value="0">Sin unidad</option>';
         foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un) echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
-        echo '</select><br><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label><br><button class="btn">Guardar</button></form>';
-        echo '<form method="post" style="margin-top:8px"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
+        echo '</select></td><td><select name="rol">';
+        $rs=$pdo->prepare("SELECT codigo,nombre FROM roles WHERE activo=1 OR codigo=? ORDER BY nombre");$rs->execute([$x['rol']]);
+        foreach($rs as $r) echo '<option value="'.h($r['codigo']).'"'.($x['rol']===$r['codigo']?' selected':'').'>'.h($r['nombre']).'</option>';
+        echo '</select></td><td><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label></td><td><button class="btn">Guardar cambios</button></form></td><td><form method="post" class="form"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
     }
-    echo '</table>';
+    echo '</table></div>';
+break;
+
+case 'roles':
+    if(!can('GESTION_ROLES')){echo '<div class="alert">No tienes permiso para gestionar roles.</div>';break;}
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        $action=$_POST['action']??'';
+        if($action==='create_role'){
+            $nombre=trim($_POST['nombre']??'');$descripcion=trim($_POST['descripcion']??'');
+            $ascii=function_exists('iconv')?iconv('UTF-8','ASCII//TRANSLIT',$nombre):$nombre;
+            $codigo=strtoupper(trim(preg_replace('/[^A-Za-z0-9]+/','_',$ascii),'_'));
+            if(!$codigo || !$nombre){echo '<div class="alert">El nombre del rol es obligatorio.</div>';}
+            else {
+                try{
+                    $pdo->prepare("INSERT INTO roles(codigo,nombre,descripcion,sistema,activo) VALUES(?,?,?,0,1)")->execute([$codigo,$nombre,$descripcion]);
+                    $rid=(int)$pdo->lastInsertId();
+                    foreach(($_POST['permisos']??[]) as $pid){$pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) VALUES(?,?)")->execute([$rid,(int)$pid]);}
+                    log_action('Creó rol '.$codigo,'roles');header('Location:index.php?page=roles');exit;
+                }catch(PDOException $e){echo '<div class="alert">No se pudo crear el rol. Es posible que ya exista otro con el mismo código.</div>';}
+            }
+        } elseif($action==='update_role'){
+            $rid=(int)$_POST['id'];$nombre=trim($_POST['nombre']??'');$descripcion=trim($_POST['descripcion']??'');$activo=isset($_POST['activo'])?1:0;
+            $st=$pdo->prepare("SELECT * FROM roles WHERE id=?");$st->execute([$rid]);$role=$st->fetch();
+            if($role && $nombre){
+                if($role['codigo']==='PRESIDENTE'){$activo=1;}
+                $pdo->prepare("UPDATE roles SET nombre=?,descripcion=?,activo=? WHERE id=?")->execute([$nombre,$descripcion,$activo,$rid]);
+                $pdo->prepare("DELETE FROM rol_permisos WHERE rol_id=?")->execute([$rid]);
+                if($role['codigo']==='PRESIDENTE'){
+                    $pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) SELECT ?,id FROM permisos")->execute([$rid]);
+                } else {
+                    foreach(($_POST['permisos']??[]) as $pid){$pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) VALUES(?,?)")->execute([$rid,(int)$pid]);}
+                }
+                log_action('Actualizó rol '.$role['codigo'],'roles');header('Location:index.php?page=roles');exit;
+            }
+        }
+    }
+
+    $permisos=$pdo->query("SELECT * FROM permisos ORDER BY nombre")->fetchAll();
+    echo '<h1>Roles</h1><p class="muted">Aquí defines qué puede hacer cada tipo de usuario. Los roles del sistema mantienen su código interno, pero puedes cambiar su nombre, descripción y permisos.</p>';
+    echo '<div class="card"><h2>Crear rol</h2><form method="post" class="form"><input type="hidden" name="action" value="create_role"><label>Nombre</label><input name="nombre" required placeholder="Ej.: Tesorero"><label>Descripción</label><input name="descripcion"><h3>Permisos</h3><div class="grid">';
+    foreach($permisos as $p) echo '<label><input type="checkbox" name="permisos[]" value="'.$p['id'].'"> '.h($p['nombre']).'</label>';
+    echo '</div><br><button class="btn">Crear rol</button></form></div><br>';
+
+    $roles=$pdo->query("SELECT * FROM roles ORDER BY sistema DESC,nombre")->fetchAll();
+    foreach($roles as $r){
+        $st=$pdo->prepare("SELECT permiso_id FROM rol_permisos WHERE rol_id=?");$st->execute([$r['id']]);$selected=array_map('intval',$st->fetchAll(PDO::FETCH_COLUMN));
+        echo '<div class="card"><h2>'.h($r['nombre']).'</h2><form method="post" class="form"><input type="hidden" name="action" value="update_role"><input type="hidden" name="id" value="'.$r['id'].'"><label>Nombre</label><input name="nombre" value="'.h($r['nombre']).'" required><label>Descripción</label><input name="descripcion" value="'.h($r['descripcion']).'"><label><input type="checkbox" name="activo"'.($r['activo']?' checked':'').' '.($r['codigo']==='PRESIDENTE'?'disabled':'').'> Activo</label><h3>Permisos</h3><div class="grid">';
+        foreach($permisos as $p) echo '<label><input type="checkbox" name="permisos[]" value="'.$p['id'].'"'.(in_array((int)$p['id'],$selected,true)?' checked':'').($r['codigo']==='PRESIDENTE'?' disabled':'').'> '.h($p['nombre']).'</label>';
+        echo '</div><br><button class="btn">Guardar rol</button></form></div><br>';
+    }
 break;
 
 case 'propietarios':
-    if(!is_president()){echo '<div class="alert">Solo el Presidente puede gestionar propietarios.</div>';break;}
+    if(!can('CAMBIO_PROPIETARIO')){echo '<div class="alert">No tienes permiso para gestionar propietarios.</div>';break;}
     if($_SERVER['REQUEST_METHOD']==='POST'){
         $unidad=(int)$_POST['unidad_id']; $fecha=$_POST['fecha_inicio']; $nombre=trim($_POST['propietario']); $email=trim($_POST['email']); $telefono=trim($_POST['telefono']); $motivo=trim($_POST['motivo']);
         if($unidad && $nombre && $fecha){
