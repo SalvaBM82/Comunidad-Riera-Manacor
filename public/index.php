@@ -604,23 +604,32 @@ case 'roles':
 
     $permisos=$pdo->query("SELECT * FROM permisos ORDER BY nombre")->fetchAll();
 
-    // Roles: interfaz compacta. La edición completa queda dentro de cada desplegable.
-    echo '<div class="page-head"><div><h1>Roles</h1><p class="muted">Define los permisos de cada rol. Un usuario puede tener varios roles.</p></div><details class="role-create"><summary class="btn">+ Nuevo rol</summary><div class="card role-create-body"><form method="post" class="form"><input type="hidden" name="action" value="create_role"><label>Nombre</label><input name="nombre" required placeholder="Ej.: Tesorero"><label>Descripción</label><input name="descripcion" placeholder="Descripción breve"><label>Permisos</label><div class="permissions-grid">';
-    foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"> '.h($p['nombre']).'</label>';
-    echo '</div><br><button class="btn">Crear rol</button></form></div></details></div>';
+    // Roles: listado compacto. La edición se realiza en una ventana modal para no deformar la tabla.
+    echo '<div class="page-head"><div><h1>Roles</h1><p class="muted">Define los permisos de cada rol. Un usuario puede tener varios roles.</p></div><button type="button" class="btn" onclick="document.getElementById(\'new-role-modal\').showModal()">+ Nuevo rol</button></div>';
 
     $roles=$pdo->query("SELECT r.*, (SELECT COUNT(*) FROM usuario_roles ur JOIN usuarios u ON u.id=ur.usuario_id WHERE ur.rol_id=r.id AND u.activo=1) AS usuarios_activos FROM roles r ORDER BY r.sistema DESC,r.nombre")->fetchAll();
 
-    echo '<div class="card roles-list"><table><tr><th>Rol</th><th>Descripción</th><th>Usuarios</th><th>Estado</th><th></th></tr>';
+    echo '<div class="card roles-list"><table><tr><th>Rol</th><th>Descripción</th><th class="role-users-col">Usuarios</th><th>Estado</th><th class="role-actions-col">Acciones</th></tr>';
     foreach($roles as $r){
         $st=$pdo->prepare("SELECT permiso_id FROM rol_permisos WHERE rol_id=?");$st->execute([$r['id']]);
         $selected=array_map('intval',$st->fetchAll(PDO::FETCH_COLUMN));
         $badge=$r['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>';
-        echo '<tr><td><strong>'.h($r['nombre']).'</strong>'.($r['sistema']?'<div class="muted small">Rol del sistema</div>':'').'</td><td>'.h($r['descripcion']??'').'</td><td>'.(int)$r['usuarios_activos'].'</td><td>'.$badge.'</td><td><details class="role-details"><summary class="btn gray">Editar</summary><div class="role-editor"><form method="post" class="form"><input type="hidden" name="action" value="update_role"><input type="hidden" name="id" value="'.$r['id'].'"><div class="role-fields"><div><label>Nombre</label><input name="nombre" value="'.h($r['nombre']).'" required></div><div><label>Descripción</label><input name="descripcion" value="'.h($r['descripcion']??'').'"></div></div><label><input type="checkbox" name="activo"'.($r['activo']?' checked':'').' '.($r['codigo']==='PRESIDENTE'?'disabled':'').'> Activo</label><label>Permisos</label><div class="permissions-grid">';
-        foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"'.(in_array((int)$p['id'],$selected,true)?' checked':'').($r['codigo']==='PRESIDENTE'?' disabled':'').'> '.h($p['nombre']).'</label>';
-        echo '</div><br><button class="btn">Guardar cambios</button></form></div></details></td></tr>';
+        echo '<tr><td><strong>'.h($r['nombre']).'</strong>'.($r['sistema']?'<div class="muted small">Rol del sistema</div>':'').'</td><td class="role-description">'.h($r['descripcion']??'').'</td><td class="role-users-col">'.(int)$r['usuarios_activos'].'</td><td>'.$badge.'</td><td class="role-actions-col"><button type="button" class="btn gray" onclick="document.getElementById(\'role-modal-'.$r['id'].'\').showModal()">Editar</button></td></tr>';
     }
     echo '</table></div>';
+
+    echo '<dialog id="new-role-modal" class="role-modal"><div class="role-modal-header"><div><h2>Nuevo rol</h2><p class="muted">Crea un rol y asigna únicamente los permisos que necesite.</p></div><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><form method="post" class="role-modal-form"><input type="hidden" name="action" value="create_role"><div class="role-fields"><div><label>Nombre</label><input name="nombre" required placeholder="Ej.: Tesorero"></div><div><label>Descripción</label><input name="descripcion" placeholder="Descripción breve"></div></div><label>Permisos</label><div class="permissions-grid">';
+    foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"> '.h($p['nombre']).'</label>';
+    echo '</div><div class="role-modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Crear rol</button></div></form></dialog>';
+
+    foreach($roles as $r){
+        $st=$pdo->prepare("SELECT permiso_id FROM rol_permisos WHERE rol_id=?");$st->execute([$r['id']]);
+        $selected=array_map('intval',$st->fetchAll(PDO::FETCH_COLUMN));
+        echo '<dialog id="role-modal-'.$r['id'].'" class="role-modal"><div class="role-modal-header"><div><h2>Editar rol</h2><p class="muted">'.h($r['nombre']).($r['sistema']?' · Rol del sistema':'').'</p></div><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><form method="post" class="role-modal-form"><input type="hidden" name="action" value="update_role"><input type="hidden" name="id" value="'.$r['id'].'"><div class="role-fields"><div><label>Nombre</label><input name="nombre" value="'.h($r['nombre']).'" required></div><div><label>Descripción</label><input name="descripcion" value="'.h($r['descripcion']??'').'"></div></div><label class="role-active"><input type="checkbox" name="activo"'.($r['activo']?' checked':'').' '.($r['codigo']==='PRESIDENTE'?'disabled':'').'> Activo</label><label>Permisos</label><div class="permissions-grid">';
+        foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"'.(in_array((int)$p['id'],$selected,true)?' checked':'').($r['codigo']==='PRESIDENTE'?' disabled':'').'> '.h($p['nombre']).'</label>';
+        echo '</div><div class="role-modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Guardar cambios</button></div></form></dialog>';
+    }
+
 break;
 
 case 'propietarios':
