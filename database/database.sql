@@ -33,7 +33,7 @@ CREATE TABLE usuarios (
 
 -- Usuario inicial: admin@comunidad.local / Cambiar123!
 INSERT INTO usuarios (email,password_hash,unidad_id,rol)
-VALUES ('admin@comunidad.local', '$2y$10$92IXUN6YQJ9f8qXK8w7KQe7x1Jr6mX7Gf4g2M0p0fM4X5gK2Xj3i2', 3, 'PRESIDENTE');
+VALUES ('admin@comunidad.local', '$2y$12$qcwEK955R92FhTjPgq/QlePG2/yE3cWl0HCFgjbTe5V3YKQDKgHM.', 3, 'PRESIDENTE');
 
 CREATE TABLE gastos (
  id INT AUTO_INCREMENT PRIMARY KEY,
