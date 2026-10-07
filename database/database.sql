@@ -52,8 +52,15 @@ CREATE TABLE rol_permisos (
  FOREIGN KEY (permiso_id) REFERENCES permisos(id) ON DELETE CASCADE
 );
 
+-- Administrador: acceso completo a la aplicación, incluida su administración técnica.
 INSERT INTO rol_permisos (rol_id,permiso_id)
-SELECT r.id,p.id FROM roles r CROSS JOIN permisos p WHERE r.codigo IN ('PRESIDENTE','ADMINISTRADOR');
+SELECT r.id,p.id FROM roles r CROSS JOIN permisos p WHERE r.codigo='ADMINISTRADOR';
+
+-- Presidente: permisos de gestión de la comunidad, pero no administración técnica.
+INSERT INTO rol_permisos (rol_id,permiso_id)
+SELECT r.id,p.id FROM roles r JOIN permisos p
+  ON p.codigo IN ('CAMBIO_PROPIETARIO','GESTION_UNIDADES','GESTION_GASTOS','GESTION_PRESUPUESTOS','GESTION_RECIBOS','GESTION_DERRAMAS','VER_MOROSIDAD','GESTION_INCIDENCIAS','GESTION_DOCUMENTOS','GESTION_VOTACIONES')
+WHERE r.codigo='PRESIDENTE';
 
 INSERT INTO rol_permisos (rol_id,permiso_id)
 SELECT r.id,p.id FROM roles r JOIN permisos p ON p.codigo IN ('GESTION_DOCUMENTOS','GESTION_INCIDENCIAS','GESTION_VOTACIONES') WHERE r.codigo IN ('SECRETARIO','VICEPRESIDENTE','VOCAL');
