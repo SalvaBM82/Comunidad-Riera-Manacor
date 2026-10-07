@@ -7,7 +7,7 @@ if($page==='logout'){ logout_user(); header('Location: index.php?page=login'); e
 
 if($page==='login'){
     $err='';
-    if($_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_INCIDENCIAS') && $_SERVER['REQUEST_METHOD']==='POST'){
         if(login_user(trim($_POST['email']),$_POST['password'])){ header('Location:index.php'); exit; }
         $err='Email o contraseña incorrectos.';
     }
@@ -46,20 +46,20 @@ case 'dashboard':
 break;
 
 case 'unidades':
-    if(!is_president()){echo '<div class="alert">Solo el Presidente puede gestionar unidades.</div>';break;}
+    if(!can('GESTION_UNIDADES')){echo '<div class="alert">No tienes permiso para gestionar unidades.</div>';break;}
     echo '<h1>Unidades</h1><table><tr><th>Unidad</th><th>Propietario</th><th>General</th><th>Escalera</th><th>Acceso</th></tr>';
     foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<tr><td>'.h($x['nombre']).'</td><td>'.h($x['propietario']).'</td><td>'.$x['coef_general'].'%</td><td>'.$x['coef_escalera'].'%</td><td>'.($x['tiene_acceso_escalera']?'Sí':'No').'</td></tr>';
     echo '</table>';
 break;
 
 case 'gastos':
-    if(is_president() && $_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_GASTOS') && $_SERVER['REQUEST_METHOD']==='POST'){
         $pdo->prepare("INSERT INTO gastos(fecha,concepto,proveedor,importe_total,tipo_gasto,pagado,created_by) VALUES(?,?,?,?,?,?,?)")
             ->execute([$_POST['fecha'],$_POST['concepto'],$_POST['proveedor'],$_POST['importe'],$_POST['tipo'],isset($_POST['pagado'])?1:0,current_user()['id']]);
         log_action('Creó gasto','gastos'); header('Location:index.php?page=gastos'); exit;
     }
     echo '<h1>Gastos</h1>';
-    if(is_president()) echo '<form method="post" class="form"><label>Fecha</label><input type="date" name="fecha" required><label>Concepto</label><input name="concepto" required><label>Proveedor</label><input name="proveedor"><label>Importe</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label><input type="checkbox" name="pagado"> Pagado</label><br><button class="btn">Guardar gasto</button></form><br>';
+    if(can('GESTION_GASTOS')) echo '<form method="post" class="form"><label>Fecha</label><input type="date" name="fecha" required><label>Concepto</label><input name="concepto" required><label>Proveedor</label><input name="proveedor"><label>Importe</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label><input type="checkbox" name="pagado"> Pagado</label><br><button class="btn">Guardar gasto</button></form><br>';
     $rows=$pdo->query("SELECT g.*,u.email FROM gastos g LEFT JOIN usuarios u ON u.id=g.created_by ORDER BY g.fecha DESC,g.id DESC")->fetchAll();
     echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Estado</th></tr>';
     foreach($rows as $x) echo '<tr><td>'.h($x['fecha']).'</td><td>'.h($x['concepto']).'</td><td>'.h($x['proveedor']).'</td><td><span class="pill">'.h($x['tipo_gasto']).'</span></td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.($x['pagado']?'Pagado':'Pendiente').'</td></tr>';
@@ -67,19 +67,19 @@ case 'gastos':
 break;
 
 case 'presupuestos':
-    if(is_president() && $_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_PRESUPUESTOS') && $_SERVER['REQUEST_METHOD']==='POST'){
         $pdo->prepare("INSERT INTO presupuestos(anio,tipo_gasto,concepto,importe_previsto) VALUES(?,?,?,?)")->execute([$_POST['anio'],$_POST['tipo'],$_POST['concepto'],$_POST['importe']]);
         header('Location:index.php?page=presupuestos');exit;
     }
     echo '<h1>Presupuestos anuales</h1>';
-    if(is_president()) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Concepto</label><input name="concepto" required><label>Importe previsto anual</label><input type="number" step="0.01" name="importe" required><br><button class="btn">Añadir</button></form><br>';
+    if(can('GESTION_PRESUPUESTOS')) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Concepto</label><input name="concepto" required><label>Importe previsto anual</label><input type="number" step="0.01" name="importe" required><br><button class="btn">Añadir</button></form><br>';
     echo '<table><tr><th>Año</th><th>Tipo</th><th>Concepto</th><th>Previsto</th><th>Real</th></tr>';
     foreach($pdo->query("SELECT * FROM presupuestos ORDER BY anio DESC,id DESC") as $x) echo '<tr><td>'.$x['anio'].'</td><td>'.$x['tipo_gasto'].'</td><td>'.h($x['concepto']).'</td><td>'.number_format($x['importe_previsto'],2,',','.').' €</td><td>'.number_format($x['importe_real'],2,',','.').' €</td></tr>';
     echo '</table>';
 break;
 
 case 'recibos':
-    if(is_president() && $_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_RECIBOS') && $_SERVER['REQUEST_METHOD']==='POST'){
         $year=(int)$_POST['anio'];$month=(int)$_POST['mes'];
         $ug=$pdo->query("SELECT COALESCE(SUM(importe_previsto),0) x FROM presupuestos WHERE anio=$year AND tipo_gasto='GENERAL'")->fetch()['x']/12;
         $ue=$pdo->query("SELECT COALESCE(SUM(importe_previsto),0) x FROM presupuestos WHERE anio=$year AND tipo_gasto='ESCALERA'")->fetch()['x']/12;
@@ -92,7 +92,7 @@ case 'recibos':
         log_action("Generó recibos $year-$month",'recibos'); header('Location:index.php?page=recibos');exit;
     }
     echo '<h1>Recibos</h1>';
-    if(is_president()) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'"><label>Mes</label><input type="number" min="1" max="12" name="mes" value="'.date('n').'"><label>Vencimiento</label><input type="date" name="vencimiento" value="'.date('Y-m-d',strtotime('+15 days')).'"><br><button class="btn">Generar recibos</button></form><br>';
+    if(can('GESTION_RECIBOS')) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'"><label>Mes</label><input type="number" min="1" max="12" name="mes" value="'.date('n').'"><label>Vencimiento</label><input type="date" name="vencimiento" value="'.date('Y-m-d',strtotime('+15 days')).'"><br><button class="btn">Generar recibos</button></form><br>';
     echo '<table><tr><th>Periodo</th><th>Unidad</th><th>General</th><th>Escalera</th><th>Total</th><th>Estado</th></tr>';
     $rows=$pdo->query("SELECT r.*,u.nombre FROM recibos r JOIN unidades u ON u.id=r.unidad_id ORDER BY r.anio DESC,r.mes DESC,u.id")->fetchAll();
     foreach($rows as $x) echo '<tr><td>'.$x['mes'].'/'.$x['anio'].'</td><td>'.h($x['nombre']).'</td><td>'.number_format($x['importe_general'],2,',','.').' €</td><td>'.number_format($x['importe_escalera'],2,',','.').' €</td><td><b>'.number_format($x['total'],2,',','.').' €</b></td><td>'.$x['estado'].'</td></tr>';
@@ -100,20 +100,20 @@ case 'recibos':
 break;
 
 case 'derramas':
-    if(is_president() && $_SERVER['REQUEST_METHOD']==='POST'){
+    if(can('GESTION_DERRAMAS') && $_SERVER['REQUEST_METHOD']==='POST'){
         $pdo->prepare("INSERT INTO derramas(titulo,descripcion,fecha_acuerdo_junta,importe_total,tipo,fecha_limite) VALUES(?,?,?,?,?,?)")
         ->execute([$_POST['titulo'],$_POST['descripcion'],$_POST['fecha_acuerdo'],$_POST['importe'],$_POST['tipo'],$_POST['limite']]);
         log_action('Creó derrama','derramas');header('Location:index.php?page=derramas');exit;
     }
     echo '<h1>Derramas</h1>';
-    if(is_president()) echo '<form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Fecha acuerdo</label><input type="date" name="fecha_acuerdo"><label>Importe total</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Fecha límite</label><input type="date" name="limite" required><br><button class="btn">Crear derrama</button></form><br>';
+    if(can('GESTION_DERRAMAS')) echo '<form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Fecha acuerdo</label><input type="date" name="fecha_acuerdo"><label>Importe total</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Fecha límite</label><input type="date" name="limite" required><br><button class="btn">Crear derrama</button></form><br>';
     echo '<table><tr><th>Título</th><th>Tipo</th><th>Importe</th><th>Límite</th></tr>';
     foreach($pdo->query("SELECT * FROM derramas ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.$x['fecha_limite'].'</td></tr>';
     echo '</table>';
 break;
 
 case 'morosidad':
-    if(!is_president()){echo '<div class="alert">El informe detallado de morosidad solo está disponible para el Presidente.</div>';break;}
+    if(!can('VER_MOROSIDAD')){echo '<div class="alert">No tienes permiso para consultar la morosidad.</div>';break;}
     echo '<h1>Morosidad</h1><p class="muted">Informe interno de deuda. Los propietarios normales no pueden ver el detalle de otros vecinos.</p>';
     $rows=$pdo->query("SELECT u.id,u.nombre,u.propietario,COALESCE(SUM(CASE WHEN r.estado IN ('VENCIDO') THEN r.total ELSE 0 END),0) deuda FROM unidades u LEFT JOIN recibos r ON r.unidad_id=u.id GROUP BY u.id ORDER BY deuda DESC")->fetchAll();
     echo '<table><tr><th>Unidad</th><th>Propietario</th><th>Recibos vencidos</th></tr>';
@@ -126,7 +126,7 @@ case 'incidencias':
         $pdo->prepare("INSERT INTO incidencias(titulo,descripcion,tipo,created_by) VALUES(?,?,?,?)")->execute([$_POST['titulo'],$_POST['descripcion'],$_POST['tipo'],current_user()['id']]);
         header('Location:index.php?page=incidencias');exit;
     }
-    echo '<h1>Incidencias</h1><form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><br><button class="btn">Crear incidencia</button></form><br>';
+    echo '<h1>Incidencias</h1>'; if(can('GESTION_INCIDENCIAS')) echo '<form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><br><button class="btn">Crear incidencia</button></form><br>';
     echo '<table><tr><th>Título</th><th>Tipo</th><th>Estado</th><th>Fecha</th></tr>';
     foreach($pdo->query("SELECT * FROM incidencias ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.$x['estado'].'</td><td>'.$x['created_at'].'</td></tr>';
     echo '</table>';
