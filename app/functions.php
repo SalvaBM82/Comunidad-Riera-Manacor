@@ -28,3 +28,10 @@ function log_action($accion,$entidad=''){
     $uid=$_SESSION['user']['id']??null;
     $pdo->prepare("INSERT INTO logs(usuario_id,accion,entidad_afectada) VALUES(?,?,?)")->execute([$uid,$accion,$entidad]);
 }
+
+function external_url($url){
+    $url=trim((string)$url);
+    if($url==='' || !filter_var($url,FILTER_VALIDATE_URL)) return false;
+    $scheme=strtolower((string)parse_url($url,PHP_URL_SCHEME));
+    return in_array($scheme,['http','https'],true);
+}
