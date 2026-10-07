@@ -581,7 +581,6 @@ case 'roles':
             $rid=(int)$_POST['id'];$nombre=trim($_POST['nombre']??'');$descripcion=trim($_POST['descripcion']??'');$activo=isset($_POST['activo'])?1:0;
             $st=$pdo->prepare("SELECT * FROM roles WHERE id=?");$st->execute([$rid]);$role=$st->fetch();
             if($role && $nombre){
-                if($role['codigo']==='PRESIDENTE'){$activo=1;}
                 if(!$activo){
                     $st=$pdo->prepare("SELECT COUNT(*) FROM usuario_roles ur JOIN usuarios u ON u.id=ur.usuario_id WHERE ur.rol_id=? AND u.activo=1");
                     $st->execute([$rid]);
@@ -592,11 +591,7 @@ case 'roles':
                 }
                 $pdo->prepare("UPDATE roles SET nombre=?,descripcion=?,activo=? WHERE id=?")->execute([$nombre,$descripcion,$activo,$rid]);
                 $pdo->prepare("DELETE FROM rol_permisos WHERE rol_id=?")->execute([$rid]);
-                if($role['codigo']==='PRESIDENTE'){
-                    $pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) SELECT ?,id FROM permisos")->execute([$rid]);
-                } else {
-                    foreach(($_POST['permisos']??[]) as $pid){$pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) VALUES(?,?)")->execute([$rid,(int)$pid]);}
-                }
+                foreach(($_POST['permisos']??[]) as $pid){$pdo->prepare("INSERT IGNORE INTO rol_permisos(rol_id,permiso_id) VALUES(?,?)")->execute([$rid,(int)$pid]);}
                 log_action('Actualizó rol '.$role['codigo'],'roles');header('Location:index.php?page=roles');exit;
             }
         }
@@ -625,8 +620,8 @@ case 'roles':
     foreach($roles as $r){
         $st=$pdo->prepare("SELECT permiso_id FROM rol_permisos WHERE rol_id=?");$st->execute([$r['id']]);
         $selected=array_map('intval',$st->fetchAll(PDO::FETCH_COLUMN));
-        echo '<dialog id="role-modal-'.$r['id'].'" class="role-modal"><div class="role-modal-header"><div><h2>Editar rol</h2><p class="muted">'.h($r['nombre']).($r['sistema']?' · Rol del sistema':'').'</p></div><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><form method="post" class="role-modal-form"><input type="hidden" name="action" value="update_role"><input type="hidden" name="id" value="'.$r['id'].'"><div class="role-fields"><div><label>Nombre</label><input name="nombre" value="'.h($r['nombre']).'" required></div><div><label>Descripción</label><input name="descripcion" value="'.h($r['descripcion']??'').'"></div></div><label class="role-active"><input type="checkbox" name="activo"'.($r['activo']?' checked':'').' '.($r['codigo']==='PRESIDENTE'?'disabled':'').'> Activo</label><label>Permisos</label><div class="permissions-grid">';
-        foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"'.(in_array((int)$p['id'],$selected,true)?' checked':'').($r['codigo']==='PRESIDENTE'?' disabled':'').'> '.h($p['nombre']).'</label>';
+        echo '<dialog id="role-modal-'.$r['id'].'" class="role-modal"><div class="role-modal-header"><div><h2>Editar rol</h2><p class="muted">'.h($r['nombre']).($r['sistema']?' · Rol del sistema':'').'</p></div><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><form method="post" class="role-modal-form"><input type="hidden" name="action" value="update_role"><input type="hidden" name="id" value="'.$r['id'].'"><div class="role-fields"><div><label>Nombre</label><input name="nombre" value="'.h($r['nombre']).'" required></div><div><label>Descripción</label><input name="descripcion" value="'.h($r['descripcion']??'').'"></div></div><label class="role-active"><input type="checkbox" name="activo"'.($r['activo']?' checked':'').'> Activo</label><label>Permisos</label><div class="permissions-grid">';
+        foreach($permisos as $p) echo '<label class="permission-item"><input type="checkbox" name="permisos[]" value="'.$p['id'].'"'.(in_array((int)$p['id'],$selected,true)?' checked':'').'> '.h($p['nombre']).'</label>';
         echo '</div><div class="role-modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Guardar cambios</button></div></form></dialog>';
     }
 
