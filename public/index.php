@@ -20,7 +20,7 @@ require_login();
 function layout_start($title){
     $u=current_user();
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
-    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h(role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
+    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h($u['rol_nombre']??role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
     <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><a href="index.php?page=unidades">Unidades</a><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
     <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
     </aside><main class="main"><?php
@@ -143,49 +143,90 @@ break;
 
 case 'usuarios':
     if(!can('GESTION_USUARIOS')){echo '<div class="alert">No tienes permiso para gestionar usuarios.</div>';break;}
+
+    $activeRoles=$pdo->query("SELECT id,codigo,nombre FROM roles WHERE activo=1 ORDER BY sistema DESC,nombre")->fetchAll();
     if($_SERVER['REQUEST_METHOD']==='POST'){
         $action=$_POST['action']??'';
+
         if($action==='create'){
             $email=trim($_POST['email']??'');
             $password=$_POST['password']??'';
             $unidad=(int)($_POST['unidad_id']??0);
-            $rol=trim($_POST['rol']??'');
-            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($password)<8 || !$rol){
-                echo '<div class="alert">Email, rol y contraseña de al menos 8 caracteres son obligatorios.</div>';
+            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
+
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($password)<8 || !$roles){
+                echo '<div class="alert">Email, al menos un rol y una contraseña de 8 caracteres son obligatorios.</div>';
             } else {
-                try {
-                    $pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol,rol_id,activo)
-                        SELECT ?,?,?,r.codigo,r.id,1 FROM roles r WHERE r.codigo=? AND r.activo=1")
-                        ->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$rol]);
-                    if($pdo->lastInsertId()){ log_action('Creó usuario','usuarios'); header('Location:index.php?page=usuarios'); exit; }
-                    echo '<div class="alert">El rol seleccionado no existe o está inactivo.</div>';
-                } catch(PDOException $e) {
-                    echo '<div class="alert">No se pudo crear el usuario. Comprueba que el email no esté ya registrado.</div>';
+                try{
+                    $pdo->beginTransaction();
+                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
+                    $valid->execute($roles);
+                    $validRoles=$valid->fetchAll();
+                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
+
+                    $primary=$validRoles[0];
+                    foreach($validRoles as $vr){
+                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
+                    }
+
+                    $pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol,rol_id,activo) VALUES(?,?,?,?,?,1)")
+                        ->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$primary['codigo'],$primary['id']]);
+                    $uid=(int)$pdo->lastInsertId();
+
+                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
+                    foreach($validRoles as $vr) $ins->execute([$uid,$vr['id']]);
+
+                    $pdo->commit();
+                    log_action('Creó usuario','usuarios');
+                    header('Location:index.php?page=usuarios');exit;
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo crear el usuario. Comprueba el email y los roles seleccionados.</div>';
                 }
             }
         } elseif($action==='update'){
             $id=(int)$_POST['id'];
             $email=trim($_POST['email']??'');
             $unidad=(int)($_POST['unidad_id']??0);
-            $rol=trim($_POST['rol']??'');
+            $roles=array_values(array_unique(array_map('intval',$_POST['roles']??[])));
             $activo=isset($_POST['activo'])?1:0;
             if($id===(int)current_user()['id']) $activo=1;
-            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || !$rol){echo '<div class="alert">Email y rol son obligatorios.</div>';}
-            else {
-                try {
-                    $pdo->prepare("UPDATE usuarios u JOIN roles r ON r.codigo=? AND r.activo=1
-                        SET u.email=?,u.unidad_id=?,u.rol=r.codigo,u.rol_id=r.id,u.activo=? WHERE u.id=?")
-                        ->execute([$rol,$email,$unidad?:null,$activo,$id]);
+
+            if(!filter_var($email,FILTER_VALIDATE_EMAIL) || !$roles){
+                echo '<div class="alert">Email y al menos un rol son obligatorios.</div>';
+            } else {
+                try{
+                    $pdo->beginTransaction();
+                    $valid=$pdo->prepare("SELECT id,codigo FROM roles WHERE activo=1 AND id IN (".implode(',',array_fill(0,count($roles),'?')).")");
+                    $valid->execute($roles);
+                    $validRoles=$valid->fetchAll();
+                    if(count($validRoles)!==count($roles)) throw new Exception('Hay roles no válidos o inactivos.');
+
+                    $primary=$validRoles[0];
+                    foreach($validRoles as $vr){
+                        if($vr['codigo']==='PRESIDENTE'){$primary=$vr;break;}
+                    }
+
+                    $pdo->prepare("UPDATE usuarios SET email=?,unidad_id=?,rol=?,rol_id=?,activo=? WHERE id=?")
+                        ->execute([$email,$unidad?:null,$primary['codigo'],$primary['id'],$activo,$id]);
+
+                    $pdo->prepare("DELETE FROM usuario_roles WHERE usuario_id=?")->execute([$id]);
+                    $ins=$pdo->prepare("INSERT INTO usuario_roles(usuario_id,rol_id) VALUES(?,?)");
+                    foreach($validRoles as $vr) $ins->execute([$id,$vr['id']]);
+
+                    $pdo->commit();
                     log_action('Actualizó usuario #'.$id,'usuarios');
                     header('Location:index.php?page=usuarios');exit;
-                } catch(PDOException $e) {
-                    echo '<div class="alert">No se pudo actualizar el usuario. Comprueba que el email no esté duplicado.</div>';
+                }catch(Throwable $e){
+                    if($pdo->inTransaction()) $pdo->rollBack();
+                    echo '<div class="alert">No se pudo actualizar el usuario. Comprueba el email y los roles seleccionados.</div>';
                 }
             }
         } elseif($action==='password'){
-            $id=(int)$_POST['id']; $password=$_POST['password']??'';
+            $id=(int)$_POST['id'];$password=$_POST['password']??'';
             if(strlen($password)>=8){
-                $pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$id]);
+                $pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")
+                    ->execute([password_hash($password,PASSWORD_DEFAULT),$id]);
                 log_action('Cambió contraseña de usuario #'.$id,'usuarios');
             }
             header('Location:index.php?page=usuarios');exit;
@@ -198,20 +239,28 @@ case 'usuarios':
         <label>Email</label><input type="email" name="email" required>
         <label>Contraseña inicial</label><input type="password" name="password" minlength="8" required>
         <label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
-    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
-    echo '</select><label>Rol</label><select name="rol">';
-    foreach($pdo->query("SELECT codigo,nombre FROM roles WHERE activo=1 ORDER BY nombre") as $r) echo '<option value="'.h($r['codigo']).'">'.h($r['nombre']).'</option>';
-    echo '</select><br><button class="btn">Crear usuario</button></form></div><br>';
+    foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $x)
+        echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
+    echo '</select><label>Roles</label><div class="grid">';
+    foreach($activeRoles as $r)
+        echo '<label><input type="checkbox" name="roles[]" value="'.$r['id'].'"> '.h($r['nombre']).'</label>';
+    echo '</div><br><button class="btn">Crear usuario</button></form></div><br>';
 
-    $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre,r.nombre rol_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id LEFT JOIN roles r ON r.codigo=u.rol ORDER BY u.id")->fetchAll();
-    echo '<div class="card"><h2>Usuarios existentes</h2><table><tr><th>Email</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Guardar</th><th>Contraseña</th></tr>';
+    $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id ORDER BY u.id")->fetchAll();
+    echo '<div class="card"><h2>Usuarios existentes</h2><table><tr><th>Email</th><th>Unidad</th><th>Roles</th><th>Estado</th><th>Guardar</th><th>Contraseña</th></tr>';
+    $roleSt=$pdo->prepare("SELECT r.id,r.codigo,r.nombre FROM usuario_roles ur JOIN roles r ON r.id=ur.rol_id WHERE ur.usuario_id=? ORDER BY r.sistema DESC,r.nombre");
     foreach($users as $x){
+        $roleSt->execute([$x['id']]);
+        $assigned=$roleSt->fetchAll();
+        $assignedIds=array_map('intval',array_column($assigned,'id'));
+
         echo '<tr><td><form method="post" class="form"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><input type="email" name="email" value="'.h($x['email']).'" required></td><td><select name="unidad_id"><option value="0">Sin unidad</option>';
-        foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un) echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
-        echo '</select></td><td><select name="rol">';
-        $rs=$pdo->prepare("SELECT codigo,nombre FROM roles WHERE activo=1 OR codigo=? ORDER BY nombre");$rs->execute([$x['rol']]);
-        foreach($rs as $r) echo '<option value="'.h($r['codigo']).'"'.($x['rol']===$r['codigo']?' selected':'').'>'.h($r['nombre']).'</option>';
-        echo '</select></td><td><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label></td><td><button class="btn">Guardar cambios</button></form></td><td><form method="post" class="form"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
+        foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un)
+            echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
+        echo '</select></td><td><div class="grid">';
+        foreach($activeRoles as $r)
+            echo '<label><input type="checkbox" name="roles[]" value="'.$r['id'].'"'.(in_array((int)$r['id'],$assignedIds,true)?' checked':'').'> '.h($r['nombre']).'</label>';
+        echo '</div></td><td><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label></td><td><button class="btn">Guardar cambios</button></form></td><td><form method="post" class="form"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
     }
     echo '</table></div>';
 break;
