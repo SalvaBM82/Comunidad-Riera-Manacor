@@ -1,35 +1,88 @@
 <?php
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+// Sesiones con cookies seguras y protección básica contra fijación de sesión.
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    ini_set('session.use_strict_mode', '1');
+    ini_set('session.use_only_cookies', '1');
+    session_set_cookie_params([
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+    ]);
+    session_start();
+}
 require_once __DIR__.'/db.php';
 
 function require_login() {
-    if (empty($_SESSION['user'])) {
+    $u = current_user();
+    if (!$u) {
         header('Location: index.php?page=login');
         exit;
     }
 }
-function current_user() { return $_SESSION['user'] ?? null; }
+
+function current_user() {
+    global $pdo;
+    static $loaded = false;
+    static $user = null;
+    if ($loaded) return $user;
+    $loaded = true;
+
+    $id = (int)($_SESSION['user']['id'] ?? 0);
+    if (!$id) return null;
+
+    try {
+        $st = $pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
+                    r.nombre AS rol_nombre, r.activo AS rol_activo
+                FROM usuarios u
+                LEFT JOIN unidades un ON un.id=u.unidad_id
+                LEFT JOIN roles r ON r.id=u.rol_id
+                WHERE u.id=? LIMIT 1");
+        $st->execute([$id]);
+        $row = $st->fetch();
+
+        if (!$row || !(int)$row['activo']) {
+            $_SESSION = [];
+            return null;
+        }
+
+        // Un rol desactivado no permite acceso a ninguna función, salvo que sea Presidente.
+        if (($row['rol'] ?? '') !== 'PRESIDENTE' && array_key_exists('rol_activo', $row) && !(int)$row['rol_activo']) {
+            $_SESSION = [];
+            return null;
+        }
+
+        $user = $row;
+        $_SESSION['user'] = $row;
+        return $user;
+    } catch (Throwable $e) {
+        // Compatibilidad temporal con una instalación que todavía no haya ejecutado V3.
+        $user = $_SESSION['user'] ?? null;
+        return $user;
+    }
+}
 
 function role_label($rol) {
     global $pdo;
     static $cache = [];
     if (!$rol) return '';
     if (isset($cache[$rol])) return $cache[$rol];
+
+    try {
+        $st=$pdo->prepare("SELECT nombre FROM roles WHERE codigo=? LIMIT 1");
+        $st->execute([$rol]);
+        $name=$st->fetchColumn();
+        if ($name) return $cache[$rol]=$name;
+    } catch(Throwable $e) {
+        // La tabla roles puede no existir todavía en una instalación anterior a V3.
+    }
+
     $labels = [
         'PRESIDENTE'=>'Presidente',
         'PROPIETARIO_ESCALERA'=>'Propietario con escalera',
         'PROPIETARIO_SIN_ESCALERA'=>'Propietario sin escalera',
         'PROPIETARIO'=>'Propietario'
     ];
-    if (isset($labels[$rol])) return $cache[$rol]=$labels[$rol];
-    try {
-        $st=$pdo->prepare("SELECT nombre FROM roles WHERE codigo=? LIMIT 1");
-        $st->execute([$rol]);
-        $name=$st->fetchColumn();
-        return $cache[$rol]=$name ?: $rol;
-    } catch(Throwable $e) {
-        return $cache[$rol]=$rol;
-    }
+    return $cache[$rol]=$labels[$rol]??$rol;
 }
 
 function can($permission) {
@@ -37,6 +90,7 @@ function can($permission) {
     $u=current_user();
     if (!$u) return false;
     if (($u['rol']??'')==='PRESIDENTE') return true;
+
     try {
         $st=$pdo->prepare("SELECT 1
             FROM usuarios u
@@ -52,17 +106,39 @@ function can($permission) {
 }
 
 function is_president() {
-    return !empty($_SESSION['user']) && $_SESSION['user']['rol']==='PRESIDENTE';
+    $u=current_user();
+    return $u && ($u['rol']??'')==='PRESIDENTE';
 }
 
 function login_user($email,$password) {
     global $pdo;
-    $st=$pdo->prepare("SELECT u.*, un.nombre unidad_nombre, un.tiene_acceso_escalera FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id WHERE u.email=? AND u.activo=1");
-    $st->execute([$email]); $u=$st->fetch();
+    $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
+                r.nombre AS rol_nombre, r.activo AS rol_activo
+            FROM usuarios u
+            LEFT JOIN unidades un ON un.id=u.unidad_id
+            LEFT JOIN roles r ON r.id=u.rol_id
+            WHERE u.email=? AND u.activo=1");
+    $st->execute([$email]);
+    $u=$st->fetch();
+
+    if ($u && ($u['rol']??'PRESIDENTE') !== 'PRESIDENTE' && array_key_exists('rol_activo',$u) && !(int)$u['rol_activo']) {
+        return false;
+    }
+
     if ($u && password_verify($password,$u['password_hash'])) {
-        $_SESSION['user']=$u; return true;
+        session_regenerate_id(false);
+        $_SESSION['user']=$u;
+        return true;
     }
     return false;
 }
-function logout_user(){ $_SESSION=[]; session_destroy(); }
+
+function logout_user(){
+    $_SESSION=[];
+    if (ini_get('session.use_cookies')) {
+        $params=session_get_cookie_params();
+        setcookie(session_name(),'',time()-42000,$params['path'],$params['domain'],$params['secure'],$params['httponly']);
+    }
+    session_destroy();
+}
 ?>
