@@ -333,7 +333,7 @@ case 'propietarios':
                 $pdo->prepare("UPDATE propietarios_historial SET fecha_fin=DATE_SUB(?,INTERVAL 1 DAY) WHERE unidad_id=? AND fecha_fin IS NULL")->execute([$fecha,$unidad]);
                 $pdo->prepare("INSERT INTO propietarios_historial(unidad_id,propietario,email,telefono,fecha_inicio,motivo,created_by) VALUES(?,?,?,?,?,?,?)")->execute([$unidad,$nombre,$email,$telefono,$fecha,$motivo,current_user()['id']]);
                 $pdo->prepare("UPDATE unidades SET propietario=?,email=?,telefono=? WHERE id=?")->execute([$nombre,$email,$telefono,$unidad]);
-                $pdo->prepare("UPDATE usuarios SET email=? WHERE unidad_id=? AND rol<>'PRESIDENTE' AND email=?")->execute([$email,$unidad,$old['email']]);
+                $pdo->prepare("UPDATE usuarios SET email=? WHERE unidad_id=? AND email=? AND NOT EXISTS (SELECT 1 FROM usuario_roles ur JOIN roles r ON r.id=ur.rol_id WHERE ur.usuario_id=usuarios.id AND r.codigo='PRESIDENTE')")->execute([$email,$unidad,$old['email']]);
                 log_action('Cambio de propietario de unidad #'.$unidad,'propietarios_historial');
                 $pdo->commit(); header('Location:index.php?page=propietarios&unidad_id='.$unidad); exit;
             }catch(Throwable $e){$pdo->rollBack();echo '<div class="alert">No se pudo registrar el cambio de propietario: '.h($e->getMessage()).'</div>';}
