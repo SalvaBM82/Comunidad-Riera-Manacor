@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__.'/../app/auth.php';
 require_once __DIR__.'/../app/functions.php';
+require_once __DIR__.'/../app/backups.php';
 
 $page=$_GET['page']??'dashboard';
 if($page==='logout'){ logout_user(); header('Location: index.php?page=login'); exit; }
@@ -16,6 +17,33 @@ if($page==='login'){
     <form method="post" class="form"><label>Email</label><input name="email" type="email" required><label>Contraseña</label><input name="password" type="password" required><br><br><button class="btn">Entrar</button></form></div></body></html><?php exit;
 }
 require_login();
+
+if($page==='backups' && ($_GET['action']??'')==='download'){
+    if(!can('GESTION_BACKUPS')){http_response_code(403);exit('No tienes permiso para gestionar copias de seguridad.');}
+    $sql=backup_generate_sql();
+    $filename='backup_comunidad_'.date('Y-m-d_H-i-s').'.sql';
+    header('Content-Type: application/sql; charset=utf-8');
+    header('Content-Disposition: attachment; filename="'.$filename.'"');
+    header('Content-Length: '.strlen($sql));
+    echo $sql;
+    exit;
+}
+if($page==='backups' && $_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['restore_backup'])){
+    if(!can('GESTION_BACKUPS')){http_response_code(403);exit('No tienes permiso para restaurar copias de seguridad.');}
+    if(!isset($_FILES['backup_file']) || $_FILES['backup_file']['error']!==UPLOAD_ERR_OK) exit('No se ha podido subir el archivo de backup.');
+    if($_FILES['backup_file']['size']>100*1024*1024) exit('El archivo supera el límite de 100 MB.');
+    $name=$_FILES['backup_file']['name']??'';
+    if(strtolower(pathinfo($name,PATHINFO_EXTENSION))!=='sql') exit('El backup debe ser un archivo .sql.');
+    $sql=file_get_contents($_FILES['backup_file']['tmp_name']);
+    try{
+        $count=backup_restore_sql($sql);
+        log_action('Restauró una copia de seguridad ('.$count.' sentencias)','backups');
+        header('Location:index.php?page=backups&restored=1');exit;
+    }catch(Throwable $e){
+        http_response_code(500);
+        exit('No se pudo restaurar la copia de seguridad: '.h($e->getMessage()));
+    }
+}
 
 // Gestión común de documentos externos asociados a entidades.
 if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['documento_action'])){
@@ -55,7 +83,7 @@ function layout_start($title){
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
     <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h($u['rol_nombre']??role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
     <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><?php if(can('GESTION_UNIDADES')): ?><a href="index.php?page=unidades">Unidades</a><?php endif; ?><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
-    <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
+    <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a><?php if(can('GESTION_BACKUPS')): ?><a href="index.php?page=backups">Backups</a><?php endif; ?>
     </aside><main class="main"><?php
 }
 function layout_end(){ ?></main></div></body></html><?php }
@@ -68,7 +96,15 @@ if(isset($_GET['docs_tipo'],$_GET['docs_id'])){
     if(isset($docsNames[$docsTipo]) && $docsId>0) documentos_panel($docsTipo,$docsId,$docsNames[$docsTipo].' · Documentos');
 }
 
-switch($page){
+switch($page){case 'backups':
+    if(!can('GESTION_BACKUPS')){echo '<div class="alert">No tienes permiso para gestionar copias de seguridad.</div>';break;}
+    echo '<h1>Copias de seguridad</h1>';
+    if(isset($_GET['restored'])) echo '<div class="alert" style="background:#ecfdf5;border-color:#a7f3d0">La copia de seguridad se ha restaurado correctamente.</div>';
+    echo '<div class="card"><h2>Crear backup</h2><p>Genera una copia completa de la base de datos, incluyendo estructura, usuarios, configuración de roles, gastos, recibos, documentos, votaciones y demás datos.</p><p class="muted">El archivo se descarga directamente en tu ordenador y no queda expuesto públicamente en la web.</p><a class="btn green" href="index.php?page=backups&action=download">Descargar backup completo</a></div><br>';
+    echo '<div class="card"><h2>Restaurar backup</h2><div class="alert">⚠️ Restaurar sustituirá los datos actuales por los contenidos en el backup. Haz primero una copia de seguridad de la situación actual.</div><form method="post" enctype="multipart/form-data" class="form"><input type="hidden" name="restore_backup" value="1"><label>Archivo .sql</label><input type="file" name="backup_file" accept=".sql,text/sql" required><p class="muted">Solo se aceptan copias generadas por esta aplicación. Tamaño máximo: 100 MB.</p><br><button class="btn red" onclick="return confirm(\'ATENCIÓN: se sustituirán los datos actuales. ¿Has descargado antes un backup actual?\')">Restaurar backup</button></form></div>';
+break;
+
+
 case 'dashboard':
     $un=$pdo->query("SELECT * FROM unidades ORDER BY id")->fetchAll();
     $g=(float)$pdo->query("SELECT COALESCE(SUM(importe_total),0) x FROM gastos WHERE tipo_gasto='GENERAL'")->fetch()['x'];
