@@ -20,9 +20,9 @@ require_login();
 function layout_start($title){
     $u=current_user();
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
-    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h($u['rol'])?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
+    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h(role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
     <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><a href="index.php?page=unidades">Unidades</a><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
-    <div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
+    <div class="nav-title">Administración</div><?php if(is_president()): ?><a href="index.php?page=usuarios">Usuarios y roles</a><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a>
     </aside><main class="main"><?php
 }
 function layout_end(){ ?></main></div></body></html><?php }
@@ -138,6 +138,77 @@ break;
 
 case 'votaciones':
     echo '<h1>Votaciones</h1><div class="card"><p>Módulo de votaciones preparado para temas GENERAL y ESCALERA.</p><p class="muted">La base de datos incluye votaciones y votos con bloqueo por unidad.</p></div>';
+break;
+
+
+case 'usuarios':
+    if(!is_president()){echo '<div class="alert">Solo el Presidente puede gestionar usuarios.</div>';break;}
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        $action=$_POST['action']??'';
+        if($action==='create'){
+            $email=trim($_POST['email']); $password=$_POST['password']; $unidad=(int)$_POST['unidad_id'];
+            $rol=$_POST['rol']; $allowed=['PRESIDENTE','PROPIETARIO_ESCALERA','PROPIETARIO_SIN_ESCALERA'];
+            if(!in_array($rol,$allowed,true) || !$email || strlen($password)<8){echo '<div class="alert">Email, rol y contraseña de al menos 8 caracteres son obligatorios.</div>';}
+            else {
+                try{$pdo->prepare("INSERT INTO usuarios(email,password_hash,unidad_id,rol) VALUES(?,?,?,?)")->execute([$email,password_hash($password,PASSWORD_DEFAULT),$unidad?:null,$rol]);log_action('Creó usuario','usuarios');header('Location:index.php?page=usuarios');exit;}
+                catch(PDOException $e){echo '<div class="alert">No se pudo crear el usuario. Comprueba que el email no esté ya registrado.</div>';}
+            }
+        } elseif($action==='update'){
+            $id=(int)$_POST['id']; $rol=$_POST['rol']; $unidad=(int)$_POST['unidad_id']; $activo=isset($_POST['activo'])?1:0;
+            if($id===(int)current_user()['id']) $activo=1;
+            $allowed=['PRESIDENTE','PROPIETARIO_ESCALERA','PROPIETARIO_SIN_ESCALERA'];
+            if(in_array($rol,$allowed,true)){
+                $pdo->prepare("UPDATE usuarios SET rol=?,unidad_id=?,activo=? WHERE id=?")->execute([$rol,$unidad?:null,$activo,$id]);
+                log_action('Actualizó usuario #'.$id,'usuarios');
+            }
+            header('Location:index.php?page=usuarios');exit;
+        } elseif($action==='password'){
+            $id=(int)$_POST['id']; $password=$_POST['password'];
+            if(strlen($password)>=8){$pdo->prepare("UPDATE usuarios SET password_hash=? WHERE id=?")->execute([password_hash($password,PASSWORD_DEFAULT),$id]);log_action('Cambió contraseña de usuario #'.$id,'usuarios');}
+            header('Location:index.php?page=usuarios');exit;
+        }
+    }
+    echo '<h1>Usuarios y roles</h1>';
+    echo '<div class="card"><h2>Nuevo usuario</h2><form method="post" class="form"><input type="hidden" name="action" value="create"><label>Email</label><input type="email" name="email" required><label>Contraseña inicial</label><input type="password" name="password" minlength="8" required><label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
+    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).'</option>';
+    echo '</select><label>Rol</label><select name="rol"><option value="PROPIETARIO_SIN_ESCALERA">Propietario sin escalera</option><option value="PROPIETARIO_ESCALERA">Propietario con escalera</option><option value="PRESIDENTE">Presidente</option></select><br><button class="btn">Crear usuario</button></form></div><br>';
+    $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id ORDER BY u.id")->fetchAll();
+    echo '<table><tr><th>Email</th><th>Unidad</th><th>Rol</th><th>Estado</th><th>Gestión</th></tr>';
+    foreach($users as $x){
+        echo '<tr><td>'.h($x['email']).'</td><td>'.h($x['unidad_nombre']??'Sin unidad').'</td><td><form method="post" style="display:inline"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><select name="rol"><option value="PRESIDENTE"'.($x['rol']==='PRESIDENTE'?' selected':'').'>Presidente</option><option value="PROPIETARIO_ESCALERA"'.($x['rol']==='PROPIETARIO_ESCALERA'?' selected':'').'>Propietario con escalera</option><option value="PROPIETARIO_SIN_ESCALERA"'.($x['rol']==='PROPIETARIO_SIN_ESCALERA'?' selected':'').'>Propietario sin escalera</option></select><br><select name="unidad_id"><option value="0">Sin unidad</option>';
+        foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un) echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
+        echo '</select><br><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label><br><button class="btn">Guardar</button></form>';
+        echo '<form method="post" style="margin-top:8px"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
+    }
+    echo '</table>';
+break;
+
+case 'propietarios':
+    if(!is_president()){echo '<div class="alert">Solo el Presidente puede gestionar propietarios.</div>';break;}
+    if($_SERVER['REQUEST_METHOD']==='POST'){
+        $unidad=(int)$_POST['unidad_id']; $fecha=$_POST['fecha_inicio']; $nombre=trim($_POST['propietario']); $email=trim($_POST['email']); $telefono=trim($_POST['telefono']); $motivo=trim($_POST['motivo']);
+        if($unidad && $nombre && $fecha){
+            $pdo->beginTransaction();
+            try{
+                $st=$pdo->prepare("SELECT * FROM unidades WHERE id=? FOR UPDATE");$st->execute([$unidad]);$old=$st->fetch();
+                $pdo->prepare("UPDATE propietarios_historial SET fecha_fin=DATE_SUB(?,INTERVAL 1 DAY) WHERE unidad_id=? AND fecha_fin IS NULL")->execute([$fecha,$unidad]);
+                $pdo->prepare("INSERT INTO propietarios_historial(unidad_id,propietario,email,telefono,fecha_inicio,motivo,created_by) VALUES(?,?,?,?,?,?,?)")->execute([$unidad,$nombre,$email,$telefono,$fecha,$motivo,current_user()['id']]);
+                $pdo->prepare("UPDATE unidades SET propietario=?,email=?,telefono=? WHERE id=?")->execute([$nombre,$email,$telefono,$unidad]);
+                $pdo->prepare("UPDATE usuarios SET email=? WHERE unidad_id=? AND rol<>'PRESIDENTE' AND email=?")->execute([$email,$unidad,$old['email']]);
+                log_action('Cambio de propietario de unidad #'.$unidad,'propietarios_historial');
+                $pdo->commit(); header('Location:index.php?page=propietarios&unidad_id='.$unidad); exit;
+            }catch(Throwable $e){$pdo->rollBack();echo '<div class="alert">No se pudo registrar el cambio de propietario: '.h($e->getMessage()).'</div>';}
+        }
+    }
+    echo '<h1>Cambio de propietario</h1><div class="card"><form method="post" class="form"><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href='index.php?page=propietarios&unidad_id='+this.value">';
+    foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'"'.((int)($_GET['unidad_id']??0)===(int)$x['id']?' selected':'').'>'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
+    echo '</select>';
+    $sel=(int)($_GET['unidad_id']??1);$st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$sel]);$unit=$st->fetch();
+    echo '<label>Nuevo propietario</label><input name="propietario" value="" required><label>Email</label><input type="email" name="email" value="'.h($unit['email']??'').'"><label>Teléfono</label><input name="telefono" value="'.h($unit['telefono']??'').'"><label>Fecha de inicio</label><input type="date" name="fecha_inicio" value="'.date('Y-m-d').'" required><label>Motivo</label><input name="motivo" placeholder="Compraventa, herencia, etc."><br><button class="btn">Registrar cambio</button></form></div><br>';
+    echo '<div class="card"><h2>Historial</h2><table><tr><th>Propietario</th><th>Email</th><th>Inicio</th><th>Fin</th><th>Motivo</th></tr>';
+    $st=$pdo->prepare("SELECT * FROM propietarios_historial WHERE unidad_id=? ORDER BY fecha_inicio DESC,id DESC");$st->execute([$sel]);
+    foreach($st as $x) echo '<tr><td>'.h($x['propietario']).'</td><td>'.h($x['email']).'</td><td>'.h($x['fecha_inicio']).'</td><td>'.h($x['fecha_fin']??'Actual').'</td><td>'.h($x['motivo']).'</td></tr>';
+    echo '</table></div>';
 break;
 
 default: echo '<div class="alert">Módulo no encontrado.</div>';
