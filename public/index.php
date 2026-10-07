@@ -17,6 +17,38 @@ if($page==='login'){
 }
 require_login();
 
+// Gestión común de documentos externos asociados a entidades.
+if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['documento_action'])){
+    if(!can('GESTION_DOCUMENTOS')){ http_response_code(403); exit('No tienes permiso para gestionar documentos.'); }
+    $action=$_POST['documento_action'];
+    $tipo=trim($_POST['documento_tipo']??''); $entidadId=(int)($_POST['documento_entidad_id']??0);
+    $allowed=[
+        'gasto'=>['table'=>'gastos','permission'=>'GESTION_GASTOS'],
+        'presupuesto'=>['table'=>'presupuestos','permission'=>'GESTION_PRESUPUESTOS'],
+        'recibo'=>['table'=>'recibos','permission'=>'GESTION_RECIBOS'],
+        'derrama'=>['table'=>'derramas','permission'=>'GESTION_DERRAMAS'],
+        'incidencia'=>['table'=>'incidencias','permission'=>'GESTION_INCIDENCIAS']
+    ];
+    if(!isset($allowed[$tipo]) || $entidadId<1) exit('Entidad documental no válida.');
+    if(!can($allowed[$tipo]['permission'])){ http_response_code(403); exit('No tienes permiso para gestionar esta entidad.'); }
+    $table=$allowed[$tipo]['table'];
+    $st=$pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE id=?"); $st->execute([$entidadId]);
+    if((int)$st->fetchColumn()===0) exit('La entidad no existe.');
+    try{
+        if($action==='add'){
+            $titulo=trim($_POST['documento_titulo']??''); $categoria=trim($_POST['documento_categoria']??''); $url=trim($_POST['documento_url']??'');
+            if($titulo==='' || !external_url($url)) throw new Exception('Indica un título y un enlace externo válido (http:// o https://).');
+            $pdo->prepare("INSERT INTO documentos(titulo,categoria,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?)")->execute([$titulo,$categoria?:null,$url,$tipo,$entidadId,current_user()['id']]);
+            log_action('Añadió documento a '.$tipo.' #'.$entidadId,'documentos');
+        }elseif($action==='delete'){
+            $docId=(int)($_POST['documento_id']??0);
+            $pdo->prepare("DELETE FROM documentos WHERE id=? AND entidad_tipo=? AND entidad_id=?")->execute([$docId,$tipo,$entidadId]);
+            log_action('Borró documento del '.$tipo.' #'.$entidadId,'documentos');
+        }
+        header('Location:index.php?page='.urlencode($page).'&docs_tipo='.urlencode($tipo).'&docs_id='.$entidadId); exit;
+    }catch(Throwable $e){ exit('No se pudo guardar el documento: '.h($e->getMessage())); }
+}
+
 function layout_start($title){
     $u=current_user();
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
@@ -28,6 +60,12 @@ function layout_start($title){
 function layout_end(){ ?></main></div></body></html><?php }
 
 layout_start(ucfirst($page));
+
+if(isset($_GET['docs_tipo'],$_GET['docs_id'])){
+    $docsTipo=trim($_GET['docs_tipo']); $docsId=(int)$_GET['docs_id'];
+    $docsNames=['gasto'=>'Gasto','presupuesto'=>'Presupuesto','recibo'=>'Recibo','derrama'=>'Derrama','incidencia'=>'Incidencia'];
+    if(isset($docsNames[$docsTipo]) && $docsId>0) documentos_panel($docsTipo,$docsId,$docsNames[$docsTipo].' · Documentos');
+}
 
 switch($page){
 case 'dashboard':
@@ -130,7 +168,7 @@ case 'gastos':
     echo '<h1>Gastos</h1>';
     if(can('GESTION_GASTOS')) echo '<form method="post" class="form"><label>Fecha</label><input type="date" name="fecha" required><label>Concepto</label><input name="concepto" required><label>Proveedor</label><input name="proveedor"><label>Enlace externo de factura/documento</label><input type="url" name="factura_url" placeholder="https://..."><label>Importe</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label><input type="checkbox" name="pagado"> Pagado</label><br><button class="btn">Guardar gasto</button></form><br>';
     $rows=$pdo->query("SELECT g.*,u.email FROM gastos g LEFT JOIN usuarios u ON u.id=g.created_by ORDER BY g.fecha DESC,g.id DESC")->fetchAll();
-    echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Factura/documento</th><th>Estado</th></tr>';
+    echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Factura/documento</th><th>Documentos</th><th>Estado</th></tr>';
     foreach($rows as $x) echo '<tr><td>'.h($x['fecha']).'</td><td>'.h($x['concepto']).'</td><td>'.h($x['proveedor']).'</td><td><span class="pill">'.h($x['tipo_gasto']).'</span></td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.(!empty($x['factura_url'])?'<a href="'.h($x['factura_url']).'" target="_blank" rel="noopener noreferrer">Abrir</a>':'—').'</td><td>'.($x['pagado']?'Pagado':'Pendiente').'</td></tr>';
     echo '</table>';
 break;
@@ -142,8 +180,8 @@ case 'presupuestos':
     }
     echo '<h1>Presupuestos anuales</h1>';
     if(can('GESTION_PRESUPUESTOS')) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Concepto</label><input name="concepto" required><label>Importe previsto anual</label><input type="number" step="0.01" name="importe" required><br><button class="btn">Añadir</button></form><br>';
-    echo '<table><tr><th>Año</th><th>Tipo</th><th>Concepto</th><th>Previsto</th><th>Real</th></tr>';
-    foreach($pdo->query("SELECT * FROM presupuestos ORDER BY anio DESC,id DESC") as $x) echo '<tr><td>'.$x['anio'].'</td><td>'.$x['tipo_gasto'].'</td><td>'.h($x['concepto']).'</td><td>'.number_format($x['importe_previsto'],2,',','.').' €</td><td>'.number_format($x['importe_real'],2,',','.').' €</td></tr>';
+    echo '<table><tr><th>Año</th><th>Tipo</th><th>Concepto</th><th>Previsto</th><th>Real</th><th>Documentos</th></tr>';
+    foreach($pdo->query("SELECT * FROM presupuestos ORDER BY anio DESC,id DESC") as $x) echo '<tr><td>'.$x['anio'].'</td><td>'.$x['tipo_gasto'].'</td><td>'.h($x['concepto']).'</td><td>'.number_format($x['importe_previsto'],2,',','.').' €</td><td>'.number_format($x['importe_real'],2,',','.').' €</td><td><a href="index.php?page=presupuestos&docs_tipo=presupuesto&docs_id='.$x['id'].'">'.documentos_count('presupuesto',$x['id']).'</a></td></tr>';
     echo '</table>';
 break;
 
@@ -162,9 +200,9 @@ case 'recibos':
     }
     echo '<h1>Recibos</h1>';
     if(can('GESTION_RECIBOS')) echo '<form method="post" class="form"><label>Año</label><input type="number" name="anio" value="'.date('Y').'"><label>Mes</label><input type="number" min="1" max="12" name="mes" value="'.date('n').'"><label>Vencimiento</label><input type="date" name="vencimiento" value="'.date('Y-m-d',strtotime('+15 days')).'"><br><button class="btn">Generar recibos</button></form><br>';
-    echo '<table><tr><th>Periodo</th><th>Unidad</th><th>General</th><th>Escalera</th><th>Total</th><th>Estado</th></tr>';
+    echo '<table><tr><th>Periodo</th><th>Unidad</th><th>General</th><th>Escalera</th><th>Total</th><th>Documentos</th><th>Estado</th></tr>';
     $rows=$pdo->query("SELECT r.*,u.nombre FROM recibos r JOIN unidades u ON u.id=r.unidad_id ORDER BY r.anio DESC,r.mes DESC,u.id")->fetchAll();
-    foreach($rows as $x) echo '<tr><td>'.$x['mes'].'/'.$x['anio'].'</td><td>'.h($x['nombre']).'</td><td>'.number_format($x['importe_general'],2,',','.').' €</td><td>'.number_format($x['importe_escalera'],2,',','.').' €</td><td><b>'.number_format($x['total'],2,',','.').' €</b></td><td>'.$x['estado'].'</td></tr>';
+    foreach($rows as $x) echo '<tr><td>'.$x['mes'].'/'.$x['anio'].'</td><td>'.h($x['nombre']).'</td><td>'.number_format($x['importe_general'],2,',','.').' €</td><td>'.number_format($x['importe_escalera'],2,',','.').' €</td><td><b>'.number_format($x['total'],2,',','.').' €</b></td><td><a href="index.php?page=recibos&docs_tipo=recibo&docs_id='.$x['id'].'">'.documentos_count('recibo',$x['id']).'</a></td><td>'.$x['estado'].'</td></tr>';
     echo '</table>';
 break;
 
@@ -176,8 +214,8 @@ case 'derramas':
     }
     echo '<h1>Derramas</h1>';
     if(can('GESTION_DERRAMAS')) echo '<form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Fecha acuerdo</label><input type="date" name="fecha_acuerdo"><label>Importe total</label><input type="number" step="0.01" name="importe" required><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><label>Fecha límite</label><input type="date" name="limite" required><br><button class="btn">Crear derrama</button></form><br>';
-    echo '<table><tr><th>Título</th><th>Tipo</th><th>Importe</th><th>Límite</th></tr>';
-    foreach($pdo->query("SELECT * FROM derramas ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.$x['fecha_limite'].'</td></tr>';
+    echo '<table><tr><th>Título</th><th>Tipo</th><th>Importe</th><th>Límite</th><th>Documentos</th></tr>';
+    foreach($pdo->query("SELECT * FROM derramas ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.$x['fecha_limite'].'</td><td><a href="index.php?page=derramas&docs_tipo=derrama&docs_id='.$x['id'].'">'.documentos_count('derrama',$x['id']).'</a></td></tr>';
     echo '</table>';
 break;
 
@@ -196,8 +234,8 @@ case 'incidencias':
         header('Location:index.php?page=incidencias');exit;
     }
     echo '<h1>Incidencias</h1>'; if(can('GESTION_INCIDENCIAS')) echo '<form method="post" class="form"><label>Título</label><input name="titulo" required><label>Descripción</label><textarea name="descripcion"></textarea><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select><br><button class="btn">Crear incidencia</button></form><br>';
-    echo '<table><tr><th>Título</th><th>Tipo</th><th>Estado</th><th>Fecha</th></tr>';
-    foreach($pdo->query("SELECT * FROM incidencias ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.$x['estado'].'</td><td>'.$x['created_at'].'</td></tr>';
+    echo '<table><tr><th>Título</th><th>Tipo</th><th>Estado</th><th>Fecha</th><th>Documentos</th></tr>';
+    foreach($pdo->query("SELECT * FROM incidencias ORDER BY id DESC") as $x) echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.$x['estado'].'</td><td>'.$x['created_at'].'</td><td><a href="index.php?page=incidencias&docs_tipo=incidencia&docs_id='.$x['id'].'">'.documentos_count('incidencia',$x['id']).'</a></td></tr>';
     echo '</table>';
 break;
 
