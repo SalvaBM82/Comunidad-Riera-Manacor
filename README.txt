@@ -18,9 +18,16 @@ ACTUALIZACIÓN V2 (instalación existente)
 1. Haz una copia de seguridad de la base de datos.
 2. Importa `database/migration_v2.sql` sobre la base de datos existente. No vuelvas a importar `database/database.sql`.
 3. La V2 añade Administración → Usuarios y roles y Administración → Cambios de propietario.
-4. Los roles son: PRESIDENTE, PROPIETARIO_ESCALERA y PROPIETARIO_SIN_ESCALERA.
-5. Los cambios de propietario se guardan en `propietarios_historial` y no eliminan el histórico económico de la unidad.
-6. Mantén `config/config.php` únicamente en el hosting; no publiques credenciales reales en GitHub.
+4. Los roles iniciales son: PRESIDENTE, PROPIETARIO_ESCALERA y PROPIETARIO_SIN_ESCALERA.
+
+ACTUALIZACIÓN V3 — ROLES Y USUARIOS CONFIGURABLES
+1. Después de V2, importa `database/migration_v3.sql`.
+2. Administración → Usuarios permite editar email, unidad, rol, estado y contraseña de cualquier usuario.
+3. Administración → Roles permite crear y editar roles, descripción, estado y permisos.
+4. Los roles tienen permisos configurables y los roles del sistema conservan su código interno.
+5. El Presidente mantiene acceso completo y no puede quedar desactivado.
+6. Los cambios de propietario siguen guardándose en `propietarios_historial`.
+7. Mantén `config/config.php` únicamente en el hosting; no publiques credenciales reales en GitHub.
 
 ACCESO INICIAL
 Email: admin@comunidad.local
