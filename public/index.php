@@ -538,18 +538,12 @@ case 'usuarios':
         }
     }
 
-    echo '<h1>Usuarios</h1>';
-    echo '<div class="card"><h2>Nuevo usuario</h2><form method="post" class="form">
-        <input type="hidden" name="action" value="create">
-        <label>Email</label><input type="email" name="email" required>
-        <label>Contraseña inicial</label><input type="password" name="password" minlength="8" required>
-        <label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
-    foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $x)
-        echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
-    echo '</select><label>Roles</label><div class="grid">';
-    foreach($activeRoles as $r)
-        echo '<label><input type="checkbox" name="roles[]" value="'.$r['id'].'"> '.h($r['nombre']).'</label>';
-    echo '</div><br><button class="btn">Crear usuario</button></form></div><br>';
+    echo '<div class="section-head"><h1>Usuarios</h1><button type="button" class="btn" onclick="document.getElementById(\\'user-create-modal\\').showModal()">+ Nuevo usuario</button></div>';
+    echo '<dialog id="user-create-modal" class="app-modal"><div class="modal-head"><h2>Nuevo usuario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="create"><div class="form-grid-2"><div><label>Email</label><input type="email" name="email" required></div><div><label>Contraseña inicial</label><input type="password" name="password" minlength="8" required></div><div><label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
+    foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'">'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
+    echo '</select></div><div></div></div><label>Roles</label><div class="permissions-grid">';
+    foreach($activeRoles as $r) echo '<label class="permission-item"><input type="checkbox" name="roles[]" value="'.$r['id'].'"> '.h($r['nombre']).'</label>';
+    echo '</div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\\'dialog\\').close()">Cancelar</button><button class="btn">Crear usuario</button></div></form></div></dialog>';
 
     $users=$pdo->query("SELECT u.*,un.nombre unidad_nombre FROM usuarios u LEFT JOIN unidades un ON un.id=u.unidad_id ORDER BY u.id")->fetchAll();
     echo '<div class="card"><h2>Usuarios existentes</h2><table><tr><th>Email</th><th>Unidad</th><th>Roles</th><th>Estado</th><th>Guardar</th><th>Contraseña</th></tr>';
@@ -558,16 +552,20 @@ case 'usuarios':
         $roleSt->execute([$x['id']]);
         $assigned=$roleSt->fetchAll();
         $assignedIds=array_map('intval',array_column($assigned,'id'));
-
-        echo '<tr><td><form method="post" class="form"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><input type="email" name="email" value="'.h($x['email']).'" required></td><td><select name="unidad_id"><option value="0">Sin unidad</option>';
-        foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un)
-            echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
-        echo '</select></td><td><div class="grid">';
-        foreach($activeRoles as $r)
-            echo '<label><input type="checkbox" name="roles[]" value="'.$r['id'].'"'.(in_array((int)$r['id'],$assignedIds,true)?' checked':'').'> '.h($r['nombre']).'</label>';
-        echo '</div></td><td><label><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label></td><td><button class="btn">Guardar cambios</button></form></td><td><form method="post" class="form"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><input name="password" type="password" minlength="8" placeholder="Nueva contraseña" required><button class="btn gray">Cambiar</button></form></td></tr>';
+        echo '<tr><td>'.h($x['email']).'</td><td>'.h($x['unidad_nombre']??'Sin unidad').'</td><td><div class="role-tags">';
+        foreach($assigned as $ar) echo '<span class="pill">'.h($ar['nombre']).'</span> ';
+        echo '</div></td><td>'.($x['activo']?'<span class="status-ok">Activo</span>':'<span class="status-off">Inactivo</span>').'</td><td><button type="button" class="btn gray" onclick="document.getElementById(\\'user-edit-'.$x['id'].'\\').showModal()">Editar</button> <button type="button" class="btn gray" onclick="document.getElementById(\\'user-password-'.$x['id'].'\\').showModal()">Contraseña</button></td></tr>';
     }
     echo '</table></div>';
+    foreach($users as $x){
+        $roleSt->execute([$x['id']]); $assigned=$roleSt->fetchAll(); $assignedIds=array_map('intval',array_column($assigned,'id'));
+        echo '<dialog id="user-edit-'.$x['id'].'" class="app-modal"><div class="modal-head"><h2>Editar usuario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="update"><input type="hidden" name="id" value="'.$x['id'].'"><div class="form-grid-2"><div><label>Email</label><input type="email" name="email" value="'.h($x['email']).'" required></div><div><label>Unidad</label><select name="unidad_id"><option value="0">Sin unidad</option>';
+        foreach($pdo->query("SELECT id,nombre FROM unidades ORDER BY id") as $un) echo '<option value="'.$un['id'].'"'.((int)$x['unidad_id']===(int)$un['id']?' selected':'').'>'.h($un['nombre']).'</option>';
+        echo '</select></div></div><label>Roles</label><div class="permissions-grid">';
+        foreach($activeRoles as $r) echo '<label class="permission-item"><input type="checkbox" name="roles[]" value="'.$r['id'].'"'.(in_array((int)$r['id'],$assignedIds,true)?' checked':'').'> '.h($r['nombre']).'</label>';
+        echo '</div><label class="form-check"><input type="checkbox" name="activo"'.($x['activo']?' checked':'').'> Activo</label><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\\'dialog\\').close()">Cancelar</button><button class="btn">Guardar cambios</button></div></form></div></dialog>';
+        echo '<dialog id="user-password-'.$x['id'].'" class="app-modal small-modal"><div class="modal-head"><h2>Cambiar contraseña</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="password"><input type="hidden" name="id" value="'.$x['id'].'"><label>Nueva contraseña</label><input name="password" type="password" minlength="8" required><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\\'dialog\\').close()">Cancelar</button><button class="btn">Cambiar contraseña</button></div></form></div></dialog>';
+    }
 break;
 
 case 'roles':
