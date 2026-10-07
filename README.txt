@@ -31,7 +31,7 @@ ACTUALIZACIÓN V3 — ROLES Y USUARIOS CONFIGURABLES
 
 ACCESO INICIAL
 Email: admin@comunidad.local
-Contraseña: Cambiar123!
+Contraseña: Cambiar123
 
 IMPORTANTE: cambia esta contraseña inmediatamente en una versión de producción.
 
