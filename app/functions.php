@@ -48,9 +48,12 @@ function documentos_panel($tipo,$id,$titulo='Documentos asociados'){
     $tipo=trim((string)$tipo); $id=(int)$id;
     $st=$pdo->prepare("SELECT * FROM documentos WHERE entidad_tipo=? AND entidad_id=? ORDER BY created_at DESC,id DESC");
     $st->execute([$tipo,$id]); $docs=$st->fetchAll();
-    echo '<div class="card"><h2>'.h($titulo).'</h2>';
+    $modalId='doc-panel-'.preg_replace('/[^a-z0-9_-]/i','',$tipo).'-'.$id;
+    echo '<div class="card"><div class="section-head"><h2>'.h($titulo).'</h2>';
+    if(can('GESTION_DOCUMENTOS')) echo '<button type="button" class="btn" onclick="document.getElementById(\''.h($modalId).'\').showModal()">+ Añadir documento</button>';
+    echo '</div>';
     if(can('GESTION_DOCUMENTOS')){
-        echo '<form method="post" class="form"><input type="hidden" name="documento_action" value="add"><input type="hidden" name="documento_tipo" value="'.h($tipo).'"><input type="hidden" name="documento_entidad_id" value="'.$id.'"><label>Nombre / título</label><input name="documento_titulo" required><label>Categoría</label><input name="documento_categoria" placeholder="Factura, presupuesto, acta, foto, informe..."><label>Enlace externo</label><input type="url" name="documento_url" placeholder="https://..." required><br><button class="btn">Añadir documento</button></form><br>';
+        echo '<dialog id="'.h($modalId).'" class="app-modal"><div class="modal-head"><h2>Añadir documento</h2><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="documento_action" value="add"><input type="hidden" name="documento_tipo" value="'.h($tipo).'"><input type="hidden" name="documento_entidad_id" value="'.$id.'"><label>Nombre / título</label><input name="documento_titulo" required><label>Categoría</label><input name="documento_categoria" placeholder="Factura, presupuesto, acta, foto, informe..."><label>Enlace externo</label><input type="url" name="documento_url" placeholder="https://..." required><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Añadir documento</button></div></form></div></dialog>';
     }
     if(!$docs){ echo '<p class="muted">No hay documentos asociados.</p>'; }
     else { echo '<table><tr><th>Documento</th><th>Categoría</th><th>Fecha</th>'.(can('GESTION_DOCUMENTOS')?'<th>Acciones</th>':'').'</tr>';
