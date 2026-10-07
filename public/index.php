@@ -653,7 +653,7 @@ case 'propietarios':
         }
     }
     echo '<div class="section-head"><h1>Cambio de propietario</h1><button type="button" class="btn" onclick="document.getElementById(\\'owner-change-modal\\').showModal()">+ Registrar cambio</button></div>';
-    echo '<dialog id="owner-change-modal" class="app-modal"><div class="modal-head"><h2>Registrar cambio de propietario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Unidad</label><select name="unidad_id" onchange="this.form.submit()">';
+    echo '<dialog id="owner-change-modal" class="app-modal"><div class="modal-head"><h2>Registrar cambio de propietario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href='index.php?page=propietarios&unidad_id='+this.value">';
     foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'"'.((int)($_GET['unidad_id']??1)===(int)$x['id']?' selected':'').'>'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
     echo '</select></div><div><label>Fecha de inicio</label><input type="date" name="fecha_inicio" value="'.date('Y-m-d').'" required></div></div>';
     $sel=(int)($_GET['unidad_id']??1);$st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$sel]);$unit=$st->fetch();
