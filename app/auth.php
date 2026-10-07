@@ -13,8 +13,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once __DIR__.'/db.php';
 
 function require_login() {
-    $u = current_user();
-    if (!$u) {
+    if (!current_user()) {
         header('Location: index.php?page=login');
         exit;
     }
@@ -25,121 +24,139 @@ function current_user() {
     static $loaded = false;
     static $user = null;
     if ($loaded) return $user;
-    $loaded = true;
 
+    $loaded = true;
     $id = (int)($_SESSION['user']['id'] ?? 0);
     if (!$id) return null;
 
     try {
-        $st = $pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
-                    r.nombre AS rol_nombre, r.activo AS rol_activo
-                FROM usuarios u
-                LEFT JOIN unidades un ON un.id=u.unidad_id
-                LEFT JOIN roles r ON r.id=u.rol_id
-                WHERE u.id=? LIMIT 1");
+        $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera
+            FROM usuarios u
+            LEFT JOIN unidades un ON un.id=u.unidad_id
+            WHERE u.id=? LIMIT 1");
         $st->execute([$id]);
-        $row = $st->fetch();
-
+        $row=$st->fetch();
         if (!$row || !(int)$row['activo']) {
-            $_SESSION = [];
+            $_SESSION=[];
             return null;
         }
 
-        // Un rol desactivado no permite acceso a ninguna función, salvo que sea Presidente.
-        if (($row['rol'] ?? '') !== 'PRESIDENTE' && array_key_exists('rol_activo', $row) && !(int)$row['rol_activo']) {
-            $_SESSION = [];
+        $rs=$pdo->prepare("SELECT r.id,r.codigo,r.nombre,r.activo
+            FROM usuario_roles ur
+            JOIN roles r ON r.id=ur.rol_id
+            WHERE ur.usuario_id=? AND r.activo=1
+            ORDER BY r.sistema DESC,r.nombre");
+        $rs->execute([$id]);
+        $roles=$rs->fetchAll();
+
+        if (!$roles) {
+            // Compatibilidad durante la transición: si V4 aún no se ha ejecutado,
+            // se conserva el rol único de V3.
+            if (!empty($row['rol_id'])) {
+                $rs=$pdo->prepare("SELECT id,codigo,nombre,activo FROM roles WHERE id=?");
+                $rs->execute([(int)$row['rol_id']]);
+                $legacy=$rs->fetch();
+                if ($legacy) $roles=[$legacy];
+            }
+        }
+
+        $row['roles']=$roles;
+        $row['role_codes']=array_column($roles,'codigo');
+        $row['role_names']=array_column($roles,'nombre');
+        $row['rol_nombre']=$roles ? implode(', ',$row['role_names']) : '';
+        $row['rol']=$roles ? $row['role_codes'][0] : ($row['rol']??'');
+
+        if (!$roles) {
+            $_SESSION=[];
             return null;
         }
 
-        $user = $row;
-        $_SESSION['user'] = $row;
+        $user=$row;
+        $_SESSION['user']=$row;
         return $user;
     } catch (Throwable $e) {
-        // Compatibilidad temporal con una instalación que todavía no haya ejecutado V3.
-        $user = $_SESSION['user'] ?? null;
+        // Antes de V4 puede seguir utilizándose la sesión antigua.
+        $user=$_SESSION['user']??null;
         return $user;
     }
 }
 
 function role_label($rol) {
     global $pdo;
-    static $cache = [];
+    static $cache=[];
     if (!$rol) return '';
     if (isset($cache[$rol])) return $cache[$rol];
-
     try {
         $st=$pdo->prepare("SELECT nombre FROM roles WHERE codigo=? LIMIT 1");
         $st->execute([$rol]);
         $name=$st->fetchColumn();
         if ($name) return $cache[$rol]=$name;
-    } catch(Throwable $e) {
-        // La tabla roles puede no existir todavía en una instalación anterior a V3.
-    }
+    } catch(Throwable $e) {}
+    return $cache[$rol]=$rol;
+}
 
-    $labels = [
-        'PRESIDENTE'=>'Presidente',
-        'PROPIETARIO_ESCALERA'=>'Propietario con escalera',
-        'PROPIETARIO_SIN_ESCALERA'=>'Propietario sin escalera',
-        'PROPIETARIO'=>'Propietario'
-    ];
-    return $cache[$rol]=$labels[$rol]??$rol;
+function user_roles() {
+    $u=current_user();
+    return $u['roles']??[];
+}
+
+function has_role($code) {
+    $u=current_user();
+    return $u && in_array($code,$u['role_codes']??[],true);
 }
 
 function can($permission) {
     global $pdo;
     $u=current_user();
     if (!$u) return false;
-    if (($u['rol']??'')==='PRESIDENTE') return true;
 
     try {
         $st=$pdo->prepare("SELECT 1
-            FROM usuarios u
-            JOIN roles r ON r.id=u.rol_id AND r.activo=1
+            FROM usuario_roles ur
+            JOIN roles r ON r.id=ur.rol_id AND r.activo=1
             JOIN rol_permisos rp ON rp.rol_id=r.id
             JOIN permisos p ON p.id=rp.permiso_id AND p.codigo=?
-            WHERE u.id=? AND u.activo=1 LIMIT 1");
+            JOIN usuarios u ON u.id=ur.usuario_id AND u.activo=1
+            WHERE ur.usuario_id=? LIMIT 1");
         $st->execute([$permission,$u['id']]);
-        return (bool)$st->fetchColumn();
+        if ($st->fetchColumn()) return true;
     } catch(Throwable $e) {
-        return false;
+        // Compatibilidad V3: un usuario todavía puede tener un único rol.
+        try {
+            $st=$pdo->prepare("SELECT 1
+                FROM usuarios u
+                JOIN roles r ON r.id=u.rol_id AND r.activo=1
+                JOIN rol_permisos rp ON rp.rol_id=r.id
+                JOIN permisos p ON p.id=rp.permiso_id AND p.codigo=?
+                WHERE u.id=? AND u.activo=1 LIMIT 1");
+            $st->execute([$permission,$u['id']]);
+            return (bool)$st->fetchColumn();
+        } catch(Throwable $e2) {
+            return false;
+        }
     }
+    return false;
 }
 
 function is_president() {
-    $u=current_user();
-    return $u && ($u['rol']??'')==='PRESIDENTE';
+    return has_role('PRESIDENTE');
 }
 
 function login_user($email,$password) {
     global $pdo;
-    try {
-        $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera,
-                    r.nombre AS rol_nombre, r.activo AS rol_activo
-                FROM usuarios u
-                LEFT JOIN unidades un ON un.id=u.unidad_id
-                LEFT JOIN roles r ON r.id=u.rol_id
-                WHERE u.email=? AND u.activo=1");
-        $st->execute([$email]);
-        $u=$st->fetch();
-    } catch (Throwable $e) {
-        // Permite seguir entrando mientras V3 todavía no se haya ejecutado.
-        $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera
-            FROM usuarios u
-            LEFT JOIN unidades un ON un.id=u.unidad_id
-            WHERE u.email=? AND u.activo=1");
-        $st->execute([$email]);
-        $u=$st->fetch();
-    }
-
-    if ($u && array_key_exists('rol_activo',$u)
-        && ($u['rol']??'') !== 'PRESIDENTE' && !(int)$u['rol_activo']) {
-        return false;
-    }
+    $st=$pdo->prepare("SELECT u.*, un.nombre AS unidad_nombre, un.tiene_acceso_escalera
+        FROM usuarios u
+        LEFT JOIN unidades un ON un.id=u.unidad_id
+        WHERE u.email=? AND u.activo=1");
+    $st->execute([$email]);
+    $u=$st->fetch();
 
     if ($u && password_verify($password,$u['password_hash'])) {
         session_regenerate_id(false);
-        $_SESSION['user']=$u;
-        return true;
+        $_SESSION['user']=['id'=>$u['id']];
+        // Carga inmediata de roles y estado.
+        current_user();
+        return (bool)current_user();
     }
     return false;
 }
