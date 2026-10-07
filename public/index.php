@@ -81,9 +81,32 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['documento_action'])){
 function layout_start($title){
     $u=current_user();
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
-    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div><?=h($u['unidad_nombre']??'')?> · <?=h($u['rol_nombre']??role_label($u['rol']))?> &nbsp; <a href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside>
-    <div class="nav-title">Principal</div><a href="index.php">Dashboard</a><?php if(can('GESTION_UNIDADES')): ?><a href="index.php?page=unidades">Unidades</a><?php endif; ?><a href="index.php?page=gastos">Gastos</a><a href="index.php?page=presupuestos">Presupuestos</a><a href="index.php?page=recibos">Recibos</a>
-    <div class="nav-title">Administración</div><?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES')): ?><a href="index.php?page=usuarios">Usuarios</a><a href="index.php?page=roles">Roles</a><?php endif; ?><?php if(can('CAMBIO_PROPIETARIO')): ?><a href="index.php?page=propietarios">Cambios de propietario</a><?php endif; ?><div class="nav-title">Comunidad</div><a href="index.php?page=derramas">Derramas</a><a href="index.php?page=morosidad">Morosidad</a><a href="index.php?page=incidencias">Incidencias</a><a href="index.php?page=documentos">Documentos</a><a href="index.php?page=votaciones">Votaciones</a><?php if(can('GESTION_BACKUPS')): ?><a href="index.php?page=backups">Backups</a><?php endif; ?>
+    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div class="user-info"><span><?=h($u['unidad_nombre']??'')?></span><span class="user-separator">·</span><span><?=h($u['rol_nombre']??role_label($u['rol']))?></span><a class="logout" href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside class="sidebar">
+    <nav class="sidebar-nav">
+        <div class="nav-title">Comunidad</div>
+        <a class="nav-link<?=($page==='dashboard'?' active':'')?>" href="index.php"><span class="nav-icon">📊</span><span>Inicio</span></a>
+        <?php if(can('GESTION_UNIDADES')): ?><a class="nav-link<?=($page==='unidades'?' active':'')?>" href="index.php?page=unidades"><span class="nav-icon">🏢</span><span>Unidades</span></a><?php endif; ?>
+
+        <div class="nav-title">Gestión económica</div>
+        <a class="nav-link<?=($page==='gastos'?' active':'')?>" href="index.php?page=gastos"><span class="nav-icon">💶</span><span>Gastos</span></a>
+        <a class="nav-link<?=($page==='presupuestos'?' active':'')?>" href="index.php?page=presupuestos"><span class="nav-icon">📋</span><span>Presupuestos</span></a>
+        <a class="nav-link<?=($page==='recibos'?' active':'')?>" href="index.php?page=recibos"><span class="nav-icon">🧾</span><span>Recibos</span></a>
+        <a class="nav-link<?=($page==='derramas'?' active':'')?>" href="index.php?page=derramas"><span class="nav-icon">💰</span><span>Derramas</span></a>
+        <a class="nav-link<?=($page==='morosidad'?' active':'')?>" href="index.php?page=morosidad"><span class="nav-icon">⚠️</span><span>Morosidad</span></a>
+
+        <div class="nav-title">Gestión</div>
+        <a class="nav-link<?=($page==='incidencias'?' active':'')?>" href="index.php?page=incidencias"><span class="nav-icon">🛠️</span><span>Incidencias</span></a>
+        <a class="nav-link<?=($page==='documentos'?' active':'')?>" href="index.php?page=documentos"><span class="nav-icon">📄</span><span>Documentos</span></a>
+        <a class="nav-link<?=($page==='votaciones'?' active':'')?>" href="index.php?page=votaciones"><span class="nav-icon">🗳️</span><span>Votaciones</span></a>
+
+        <?php if(can('GESTION_USUARIOS') || can('GESTION_ROLES') || can('CAMBIO_PROPIETARIO') || can('GESTION_BACKUPS')): ?>
+        <div class="nav-title">Administración</div>
+        <?php if(can('GESTION_USUARIOS')): ?><a class="nav-link<?=($page==='usuarios'?' active':'')?>" href="index.php?page=usuarios"><span class="nav-icon">👤</span><span>Usuarios</span></a><?php endif; ?>
+        <?php if(can('GESTION_ROLES')): ?><a class="nav-link<?=($page==='roles'?' active':'')?>" href="index.php?page=roles"><span class="nav-icon">🛡️</span><span>Roles</span></a><?php endif; ?>
+        <?php if(can('CAMBIO_PROPIETARIO')): ?><a class="nav-link<?=($page==='propietarios'?' active':'')?>" href="index.php?page=propietarios"><span class="nav-icon">🔄</span><span>Cambios de propietario</span></a><?php endif; ?>
+        <?php if(can('GESTION_BACKUPS')): ?><a class="nav-link<?=($page==='backups'?' active':'')?>" href="index.php?page=backups"><span class="nav-icon">💾</span><span>Backups</span></a><?php endif; ?>
+        <?php endif; ?>
+    </nav>
     </aside><main class="main"><?php
 }
 function layout_end(){ ?></main></div></body></html><?php }
