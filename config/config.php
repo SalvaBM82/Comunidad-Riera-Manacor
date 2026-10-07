@@ -1,10 +1,12 @@
 <?php
+// Copia config/config.example.php a este archivo y completa tus credenciales.
+// Este archivo NO debe contener credenciales reales en un repositorio público.
 return [
     'db' => [
-        'host' => 'sql207.infinityfree.com',
-        'name' => 'if0_43039922_comunidad',
-        'user' => 'if0_43039922',
-        'pass' => 'qRxyjVfG1ry',
+        'host' => 'TU_HOST_MYSQL',
+        'name' => 'TU_BASE_DE_DATOS',
+        'user' => 'TU_USUARIO',
+        'pass' => 'TU_CONTRASEÑA',
         'charset' => 'utf8mb4',
     ],
     'app_name' => 'Gestión Comunidad',
