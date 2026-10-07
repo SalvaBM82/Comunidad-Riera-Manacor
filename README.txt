@@ -82,3 +82,4 @@ Esta entrega es una base funcional inicial. Antes de ponerla en producción conv
 - permisos finos por tipo de gasto
 - protección CSRF, rate limiting y endurecimiento de producción
 - generación de actas/notificaciones por email
+
