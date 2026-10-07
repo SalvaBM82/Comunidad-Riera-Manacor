@@ -11,7 +11,7 @@ if($page==='login'){
         if(login_user(trim($_POST['email']),$_POST['password'])){ header('Location:index.php'); exit; }
         $err='Email o contraseña incorrectos.';
     }
-    ?><!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acceso</title><link rel="stylesheet" href="style.css"></head><body>
+    ?><!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acceso</title><link rel="stylesheet" href="style.css"><link rel="icon" type="image/svg+xml" href="favicon.svg"></head><body>
     <div class="login card"><h1>Gestión Comunidad</h1><p class="muted">Acceso de propietarios</p><?php if($err):?><div class="alert"><?=h($err)?></div><?php endif;?>
     <form method="post" class="form"><label>Email</label><input name="email" type="email" required><label>Contraseña</label><input name="password" type="password" required><br><br><button class="btn">Entrar</button></form></div></body></html><?php exit;
 }
