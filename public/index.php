@@ -238,6 +238,14 @@ case 'roles':
             $st=$pdo->prepare("SELECT * FROM roles WHERE id=?");$st->execute([$rid]);$role=$st->fetch();
             if($role && $nombre){
                 if($role['codigo']==='PRESIDENTE'){$activo=1;}
+                if(!$activo){
+                    $st=$pdo->prepare("SELECT COUNT(*) FROM usuarios WHERE rol_id=? AND activo=1");
+                    $st->execute([$rid]);
+                    if((int)$st->fetchColumn()>0){
+                        echo '<div class="alert">No se puede desactivar este rol porque hay usuarios activos asignados a él. Cambia primero esos usuarios a otro rol.</div>';
+                        break;
+                    }
+                }
                 $pdo->prepare("UPDATE roles SET nombre=?,descripcion=?,activo=? WHERE id=?")->execute([$nombre,$descripcion,$activo,$rid]);
                 $pdo->prepare("DELETE FROM rol_permisos WHERE rol_id=?")->execute([$rid]);
                 if($role['codigo']==='PRESIDENTE'){
