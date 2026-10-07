@@ -110,6 +110,11 @@ function can($permission) {
     $u=current_user();
     if (!$u) return false;
 
+    // El Administrador es el rol de administración web. Tiene acceso completo
+    // independientemente de cómo se hayan cargado los permisos en la migración.
+    // El Presidente NO recibe este trato: sus permisos son configurables.
+    if (has_role('ADMINISTRADOR')) return true;
+
     try {
         $st=$pdo->prepare("SELECT 1
             FROM usuario_roles ur
