@@ -334,14 +334,9 @@ case 'documentos':
     if($docError) echo '<div class="alert">'.h($docError).'</div>';
     $editDoc=null; $editDocId=(int)($_GET['edit']??0);
     if($editDocId && can('GESTION_DOCUMENTOS')){$st=$pdo->prepare("SELECT * FROM documentos WHERE id=?");$st->execute([$editDocId]);$editDoc=$st->fetch();}
-    echo '<h1>Documentos</h1><p class="muted">Los documentos se gestionan mediante enlaces externos. No se almacenan archivos en el servidor.</p>';
+    echo '<div class="section-head"><div><h1>Documentos</h1><p class="muted">Los documentos se gestionan mediante enlaces externos. No se almacenan archivos en el servidor.</p></div>'.(can('GESTION_DOCUMENTOS')?'<button type="button" class="btn" onclick="document.getElementById(\'document-create-modal\').showModal()">+ Nuevo documento</button>':'').'</div>';
     if(can('GESTION_DOCUMENTOS')){
-        echo '<div class="card"><h2>'.($editDoc?'Editar enlace':'Nuevo enlace documental').'</h2><form method="post" class="form">';
-        echo '<input type="hidden" name="action" value="'.($editDoc?'update_document':'create_document').'">'.($editDoc?'<input type="hidden" name="id" value="'.$editDoc['id'].'">':'');
-        echo '<label>Título</label><input name="titulo" value="'.h($editDoc['titulo']??'').'" required>';
-        echo '<label>Categoría</label><input name="categoria" value="'.h($editDoc['categoria']??'').'" placeholder="Acta, estatutos, seguro, factura...">';
-        echo '<label>Enlace externo</label><input type="url" name="archivo_url" value="'.h($editDoc['archivo_url']??'').'" placeholder="https://..." required>';
-        echo '<br><button class="btn">'.($editDoc?'Guardar cambios':'Añadir enlace').'</button>'.($editDoc?' <a class="btn gray" href="index.php?page=documentos">Cancelar</a>':'').'</form></div><br>';
+        echo '<dialog id="document-create-modal" class="app-modal"><div class="modal-head"><h2>Nuevo documento</h2><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="create_document"><label>Título</label><input name="titulo" required><label>Categoría</label><input name="categoria" placeholder="Acta, estatutos, seguro, factura..."><label>Enlace externo</label><input type="url" name="archivo_url" placeholder="https://..." required><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Añadir enlace</button></div></form></div></dialog>';
     }
     $docs=$pdo->query("SELECT d.*,u.email FROM documentos d LEFT JOIN usuarios u ON u.id=d.created_by ORDER BY d.created_at DESC,d.id DESC")->fetchAll();
     echo '<div class="card"><h2>Enlaces documentales</h2><table><tr><th>Título</th><th>Categoría</th><th>Enlace</th><th>Fecha</th>'.(can('GESTION_DOCUMENTOS')?'<th>Acciones</th>':'').'</tr>';
@@ -653,7 +648,7 @@ case 'propietarios':
         }
     }
     echo '<div class="section-head"><h1>Cambio de propietario</h1><button type="button" class="btn" onclick="document.getElementById(\\'owner-change-modal\\').showModal()">+ Registrar cambio</button></div>';
-    echo '<dialog id="owner-change-modal" class="app-modal"><div class="modal-head"><h2>Registrar cambio de propietario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href='index.php?page=propietarios&unidad_id='+this.value">';
+    echo '<dialog id="owner-change-modal" class="app-modal"><div class="modal-head"><h2>Registrar cambio de propietario</h2><button type="button" class="modal-close" onclick="this.closest(\\'dialog\\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Unidad</label><select name="unidad_id" onchange="if(this.value) location.href=\'index.php?page=propietarios&unidad_id=\'+this.value">';
     foreach($pdo->query("SELECT * FROM unidades ORDER BY id") as $x) echo '<option value="'.$x['id'].'"'.((int)($_GET['unidad_id']??1)===(int)$x['id']?' selected':'').'>'.h($x['nombre']).' — '.h($x['propietario']).'</option>';
     echo '</select></div><div><label>Fecha de inicio</label><input type="date" name="fecha_inicio" value="'.date('Y-m-d').'" required></div></div>';
     $sel=(int)($_GET['unidad_id']??1);$st=$pdo->prepare("SELECT * FROM unidades WHERE id=?");$st->execute([$sel]);$unit=$st->fetch();
