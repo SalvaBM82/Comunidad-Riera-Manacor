@@ -396,19 +396,8 @@ case 'votaciones':
         }catch(Throwable $e){$voteError=$e->getMessage();}
     }
     if($voteError) echo '<div class="alert">'.h($voteError).'</div>';
-    echo '<h1>Votaciones</h1>';
-    echo '<div class="card"><h2>Nueva votación</h2><form method="post" class="form">
-        <input type="hidden" name="vote_action" value="create_vote">
-        <label>Título / asunto</label><input name="titulo" required>
-        <label>Descripción / propuesta</label><textarea name="descripcion" rows="3"></textarea>
-        <label>Convocatoria</label><input name="convocatoria" placeholder="Junta ordinaria, extraordinaria...">
-        <label>Tipo</label><select name="tipo"><option value="GENERAL">GENERAL</option><option value="ESCALERA">ESCALERA</option></select>
-        <label>Mayoría</label><select name="mayoria"><option value="SIMPLE">Mayoría simple</option><option value="ABSOLUTA">Mayoría absoluta</option><option value="3_5">3/5</option><option value="UNANIMIDAD">Unanimidad</option><option value="COEFICIENTE">Coeficiente mínimo personalizado</option></select>
-        <label>Coeficiente mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="coef_minimo">
-        <label>Quórum mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="quorum_minimo">
-        <label>Inicio</label><input type="datetime-local" name="fecha_inicio">
-        <label>Fin</label><input type="datetime-local" name="fecha_fin">
-        <br><button class="btn">Crear votación</button></form></div><br>';
+    echo '<div class="section-head"><h1>Votaciones</h1><button type="button" class="btn" onclick="document.getElementById(\'vote-create-modal\').showModal()">+ Nueva votación</button></div>';
+    echo '<dialog id="vote-create-modal" class="app-modal wide-modal"><div class="modal-head"><h2>Nueva votación</h2><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="vote_action" value="create_vote"><div class="form-grid-2"><div><label>Título / asunto</label><input name="titulo" required></div><div><label>Convocatoria</label><input name="convocatoria" placeholder="Junta ordinaria, extraordinaria..."></div><div><label>Tipo</label><select name="tipo"><option value="GENERAL">GENERAL</option><option value="ESCALERA">ESCALERA</option></select></div><div><label>Mayoría</label><select name="mayoria"><option value="SIMPLE">Mayoría simple</option><option value="ABSOLUTA">Mayoría absoluta</option><option value="3_5">3/5</option><option value="UNANIMIDAD">Unanimidad</option><option value="COEFICIENTE">Coeficiente mínimo personalizado</option></select></div><div><label>Coeficiente mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="coef_minimo"></div><div><label>Quórum mínimo (%)</label><input type="number" step="0.01" min="0" max="100" name="quorum_minimo"></div><div><label>Inicio</label><input type="datetime-local" name="fecha_inicio"></div><div><label>Fin</label><input type="datetime-local" name="fecha_fin"></div></div><label>Descripción / propuesta</label><textarea name="descripcion" rows="4"></textarea><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Crear votación</button></div></form></div></dialog>');
     $votes=$pdo->query("SELECT v.*,u.email creador FROM votaciones v LEFT JOIN usuarios u ON u.id=v.created_by ORDER BY v.id DESC")->fetchAll();
     echo '<div class="card"><h2>Votaciones</h2><table><tr><th>Asunto</th><th>Tipo</th><th>Mayoría</th><th>Estado</th><th>Participación</th><th>Documentos</th></tr>';
     foreach($votes as $v){
@@ -425,9 +414,10 @@ case 'votaciones':
             echo '<br><div class="card"><h2>'.h($v['titulo']).'</h2><p>'.nl2br(h($v['descripcion']??'')).'</p><p><b>'.h($v['tipo']).'</b> · Mayoría: '.h($v['mayoria']).' · Estado: '.h($v['estado']).'</p>';
             echo '<p><a class="btn gray" href="index.php?page=votaciones&docs_tipo=votacion&docs_id='.$v['id'].'">Documentos ('.documentos_count('votacion',$v['id']).')</a></p>';
             if($v['estado']==='ABIERTA'){
-                echo '<h3>Registrar / cambiar voto</h3><form method="post" class="form"><input type="hidden" name="vote_action" value="cast_vote"><input type="hidden" name="votacion_id" value="'.$v['id'].'"><label>Unidad</label><select name="unidad_id">';
+                echo '<h3>Registrar / cambiar voto</h3><button type="button" class="btn" onclick="document.getElementById(\'cast-vote-modal\').showModal()">Registrar / cambiar voto</button>';
+                echo '<dialog id="cast-vote-modal" class="app-modal small-modal"><div class="modal-head"><h2>Registrar / cambiar voto</h2><button type="button" class="modal-close" onclick="this.closest(\'dialog\').close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="vote_action" value="cast_vote"><input type="hidden" name="votacion_id" value="'.$v['id'].'"><label>Unidad</label><select name="unidad_id">';
                 foreach($pdo->query("SELECT id,nombre,propietario FROM unidades ORDER BY id") as $un){$coef=$v['tipo']==='ESCALERA'?(float)$un['coef_escalera']:(float)$un['coef_general'];if($coef>0) echo '<option value="'.$un['id'].'">'.h($un['nombre']).' — '.h($un['propietario']).' ('.$coef.'%)</option>';}
-                echo '</select><label>Voto</label><select name="voto"><option value="SI">Sí</option><option value="NO">No</option><option value="ABSTENCION">Abstención</option></select><label>Comentario</label><textarea name="comentario" rows="2"></textarea><br><button class="btn">Guardar voto</button></form>';
+                echo '</select><label>Voto</label><select name="voto"><option value="SI">Sí</option><option value="NO">No</option><option value="ABSTENCION">Abstención</option></select><label>Comentario</label><textarea name="comentario" rows="3"></textarea><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(\'dialog\').close()">Cancelar</button><button class="btn">Guardar voto</button></div></form></div></dialog>';
                 echo '<form method="post" style="margin-top:12px"><input type="hidden" name="vote_action" value="close_vote"><input type="hidden" name="votacion_id" value="'.$v['id'].'"><button class="btn gray" onclick="return confirm(\'¿Cerrar esta votación? Ya no se podrán modificar los votos.\')">Cerrar votación</button></form>';
             }
             $st=$pdo->prepare("SELECT vo.*,un.nombre unidad,un.propietario FROM votos vo JOIN unidades un ON un.id=vo.unidad_id WHERE vo.votacion_id=? ORDER BY vo.id");$st->execute([$voteId]);$vr=$st->fetchAll();
