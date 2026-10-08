@@ -83,3 +83,20 @@ Esta entrega es una base funcional inicial. Antes de ponerla en producción conv
 - protección CSRF, rate limiting y endurecimiento de producción
 - generación de actas/notificaciones por email
 
+
+
+DOCUMENTOS (V9)
+---------------
+La sección Documentos permite ahora:
+- subir archivos al servidor (máximo 25 MB por archivo);
+- conservar enlaces externos;
+- sustituir o eliminar archivos;
+- asociar archivos o enlaces a Gastos, Presupuestos, Recibos, Derramas, Incidencias y Votaciones.
+
+Tipos permitidos para archivos: PDF, Word, Excel, imágenes, TXT y CSV.
+Los archivos se guardan en storage/documentos con nombres internos aleatorios y se sirven mediante un endpoint protegido, no mediante una URL pública directa.
+
+Para actualizar una instalación existente:
+1. Importar database/migration_v9.sql.
+2. Asegurarse de desplegar la carpeta storage/documentos.
+3. Comprobar que PHP permite subidas de al menos 25 MB; si el hosting impone un límite menor, ese límite prevalece.
