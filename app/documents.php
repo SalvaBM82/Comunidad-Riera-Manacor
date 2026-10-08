@@ -23,7 +23,7 @@ function documento_upload(array $file): array {
     $mime=$finfo?finfo_file($finfo,$file['tmp_name']):($file['type']??'application/octet-stream');
     if($finfo) finfo_close($finfo);
     $expected=$allowed[$ext];
-    $compatible=($ext==='jpg' || $ext==='jpeg') && $mime==='image/jpeg';
+    $compatible=(($ext==='jpg' || $ext==='jpeg') && $mime==='image/jpeg') || (($ext==='docx' || $ext==='xlsx') && in_array($mime,['application/zip','application/octet-stream'],true));
     if($mime!==$expected && !$compatible) throw new RuntimeException('El contenido del archivo no coincide con su extensión.');
     $stored=bin2hex(random_bytes(16)).'.'.$ext;
     $path=documentos_storage_dir().'/'.$stored;
