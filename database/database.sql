@@ -106,8 +106,8 @@ CREATE TABLE usuarios (
 );
 
 INSERT INTO usuarios (email,password_hash,unidad_id,rol,rol_id)
-SELECT 'admin@comunidad.local','$2y$12$qcwEK955R92FhTjPgq/QlePG2/yE3cWl0HCFgjbTe5V3YKQDKgHM.',3,'PRESIDENTE',id
-FROM roles WHERE codigo='PRESIDENTE';
+SELECT 'admin@comunidad.local','$2y$12$qcwEK955R92FhTjPgq/QlePG2/yE3cWl0HCFgjbTe5V3YKQDKgHM.',3,'ADMINISTRADOR',id
+FROM roles WHERE codigo='ADMINISTRADOR';
 
 CREATE TABLE usuario_roles (
  usuario_id INT NOT NULL,
