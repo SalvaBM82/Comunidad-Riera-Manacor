@@ -344,13 +344,39 @@ break;
 
 case 'gastos':
     if(can('GESTION_GASTOS') && $_SERVER['REQUEST_METHOD']==='POST'){
-        $pdo->prepare("INSERT INTO gastos(fecha,concepto,proveedor,importe_total,tipo_gasto,factura_url,pagado,created_by) VALUES(?,?,?,?,?,?,?,?)")
-            ->execute([$_POST['fecha'],$_POST['concepto'],$_POST['proveedor'],$_POST['importe'],$_POST['tipo'],trim($_POST['factura_url']??'')?:null,isset($_POST['pagado'])?1:0,current_user()['id']]);
-        $newId=(int)$pdo->lastInsertId();
-        log_action('Creó gasto','gastos'); header('Location:index.php?page=gastos&docs_tipo=gasto&docs_id='.$newId); exit;
+        try{
+            $facturaUrl=trim($_POST['factura_url']??'');
+            $documentoOrigen=$_POST['documento_origen']??'';
+            if($documentoOrigen==='ENLACE'){
+                $documentoUrl=trim($_POST['documento_url']??'');
+                if(!external_url($documentoUrl)) throw new Exception('Indica un enlace externo válido (http:// o https://).');
+                $facturaUrl=$documentoUrl;
+            }else{
+                $facturaUrl=$facturaUrl!==''?$facturaUrl:null;
+            }
+            $pdo->beginTransaction();
+            $pdo->prepare("INSERT INTO gastos(fecha,concepto,proveedor,importe_total,tipo_gasto,factura_url,pagado,created_by) VALUES(?,?,?,?,?,?,?,?)")
+                ->execute([$_POST['fecha'],$_POST['concepto'],$_POST['proveedor'],$_POST['importe'],$_POST['tipo'],$facturaUrl,isset($_POST['pagado'])?1:0,current_user()['id']]);
+            $newId=(int)$pdo->lastInsertId();
+
+            if($documentoOrigen==='ARCHIVO'){
+                $up=documento_upload($_FILES['documento_archivo']??[]);
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_path,archivo_nombre,archivo_mime,archivo_tamano,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento del gasto','Factura','ARCHIVO',$up['path'],$up['name'],$up['mime'],$up['size'],'gasto',$newId,current_user()['id']]);
+            }elseif($documentoOrigen==='ENLACE'){
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento del gasto','Factura','ENLACE',$facturaUrl,'gasto',$newId,current_user()['id']]);
+            }
+            $pdo->commit();
+            log_action('Creó gasto','gastos');
+            header('Location:index.php?page=gastos&docs_tipo=gasto&docs_id='.$newId); exit;
+        }catch(Throwable $e){
+            if($pdo->inTransaction()) $pdo->rollBack();
+            echo '<div class="alert">'.h('No se pudo crear el gasto: '.$e->getMessage()).'</div>';
+        }
     }
     echo '<div class="section-head"><h1>Gastos</h1>'.(can('GESTION_GASTOS')?'<button type="button" class="btn" onclick="document.getElementById(&quot;expense-modal&quot;).showModal()">+ Nuevo gasto</button>':'').'</div>';
-    if(can('GESTION_GASTOS')) echo '<dialog id="expense-modal" class="app-modal"><div class="modal-head"><h2>Nuevo gasto</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Fecha</label><input type="date" name="fecha" required></div><div><label>Concepto</label><input name="concepto" required></div><div><label>Proveedor</label><input name="proveedor"></div><div><label>Importe</label><input type="number" step="0.01" name="importe" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Enlace externo de factura/documento</label><input type="url" name="factura_url" placeholder="https://..."></div></div><label class="form-check"><input type="checkbox" name="pagado"> Pagado</label><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Guardar gasto</button></div></form></div></dialog>';
+    if(can('GESTION_GASTOS')) echo '<dialog id="expense-modal" class="app-modal wide-modal"><div class="modal-head"><h2>Nuevo gasto</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" enctype="multipart/form-data" class="modal-form"><div class="form-grid-2"><div><label>Fecha</label><input type="date" name="fecha" required></div><div><label>Concepto</label><input name="concepto" required></div><div><label>Proveedor</label><input name="proveedor"></div><div><label>Importe</label><input type="number" step="0.01" name="importe" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Documento</label><select name="documento_origen" onchange="var f=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_archivo]&quot;),u=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_url]&quot;);this.closest(&quot;form&quot;).querySelector(&quot;.expense-file-field&quot;).hidden=this.value!==&quot;ARCHIVO&quot;;this.closest(&quot;form&quot;).querySelector(&quot;.expense-url-field&quot;).hidden=this.value!==&quot;ENLACE&quot;;f.required=this.value===&quot;ARCHIVO&quot;;u.required=this.value===&quot;ENLACE&quot;"><option value="">Sin documento ahora</option><option value="ARCHIVO">📎 Subir archivo</option><option value="ENLACE">🔗 Añadir enlace externo</option></select></div><div class="expense-file-field" hidden><label>Archivo</label><input type="file" name="documento_archivo" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv"><small class="muted">Máximo 25 MB.</small></div><div class="expense-url-field" hidden><label>Enlace externo</label><input type="url" name="documento_url" placeholder="https://..."></div><div><label>Título del documento</label><input name="documento_titulo" placeholder="Factura, presupuesto, justificante..."></div><div><label>Enlace de factura/documento antiguo (opcional)</label><input type="url" name="factura_url" placeholder="https://..."></div></div><label class="form-check"><input type="checkbox" name="pagado"> Pagado</label><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Guardar gasto</button></div></form></div></dialog>';
     $rows=$pdo->query("SELECT g.*,u.email FROM gastos g LEFT JOIN usuarios u ON u.id=g.created_by ORDER BY g.fecha DESC,g.id DESC")->fetchAll();
     echo '<table><tr><th>Fecha</th><th>Concepto</th><th>Proveedor</th><th>Tipo</th><th>Importe</th><th>Factura/documento</th><th>Documentos</th><th>Estado</th></tr>';
     foreach($rows as $x){ echo '<tr><td>'.h($x['fecha']).'</td><td>'.h($x['concepto']).'</td><td>'.h($x['proveedor']).'</td><td><span class="pill">'.h($x['tipo_gasto']).'</span></td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.(!empty($x['factura_url'])?'<a href="'.h($x['factura_url']).'" target="_blank" rel="noopener noreferrer">Abrir</a>':'—').'</td><td>'; documentos_panel('gasto',(int)$x['id'],'Gasto · Documentos',true); echo '</td><td>'.($x['pagado']?'Pagado':'Pendiente').'</td></tr>'; }
@@ -359,12 +385,30 @@ break;
 
 case 'presupuestos':
     if(can('GESTION_PRESUPUESTOS') && $_SERVER['REQUEST_METHOD']==='POST'){
-        $pdo->prepare("INSERT INTO presupuestos(anio,tipo_gasto,concepto,importe_previsto) VALUES(?,?,?,?)")->execute([$_POST['anio'],$_POST['tipo'],$_POST['concepto'],$_POST['importe']]);
-        $newId=(int)$pdo->lastInsertId();
-        header('Location:index.php?page=presupuestos&docs_tipo=presupuesto&docs_id='.$newId);exit;
+        try{
+            $pdo->beginTransaction();
+            $pdo->prepare("INSERT INTO presupuestos(anio,tipo_gasto,concepto,importe_previsto) VALUES(?,?,?,?)")->execute([$_POST['anio'],$_POST['tipo'],$_POST['concepto'],$_POST['importe']]);
+            $newId=(int)$pdo->lastInsertId();
+            $documentoOrigen=$_POST['documento_origen']??'';
+            if($documentoOrigen==='ARCHIVO'){
+                $up=documento_upload($_FILES['documento_archivo']??[]);
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_path,archivo_nombre,archivo_mime,archivo_tamano,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento del presupuesto','Presupuesto','ARCHIVO',$up['path'],$up['name'],$up['mime'],$up['size'],'presupuesto',$newId,current_user()['id']]);
+            }elseif($documentoOrigen==='ENLACE'){
+                $url=trim($_POST['documento_url']??'');
+                if(!external_url($url)) throw new Exception('Indica un enlace externo válido (http:// o https://).');
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento del presupuesto','Presupuesto','ENLACE',$url,'presupuesto',$newId,current_user()['id']]);
+            }
+            $pdo->commit();
+            header('Location:index.php?page=presupuestos&docs_tipo=presupuesto&docs_id='.$newId);exit;
+        }catch(Throwable $e){
+            if($pdo->inTransaction()) $pdo->rollBack();
+            echo '<div class="alert">'.h('No se pudo crear el presupuesto: '.$e->getMessage()).'</div>';
+        }
     }
     echo '<div class="section-head"><h1>Presupuestos anuales</h1>'.(can('GESTION_PRESUPUESTOS')?'<button type="button" class="btn" onclick="document.getElementById(&quot;budget-modal&quot;).showModal()">+ Nuevo presupuesto</button>':'').'</div>';
-    if(can('GESTION_PRESUPUESTOS')) echo '<dialog id="budget-modal" class="app-modal"><div class="modal-head"><h2>Nuevo presupuesto</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Año</label><input type="number" name="anio" value="'.date('Y').'" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Concepto</label><input name="concepto" required></div><div><label>Importe previsto anual</label><input type="number" step="0.01" name="importe" required></div></div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Añadir</button></div></form></div></dialog>';
+    if(can('GESTION_PRESUPUESTOS')) echo '<dialog id="budget-modal" class="app-modal wide-modal"><div class="modal-head"><h2>Nuevo presupuesto</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" enctype="multipart/form-data" class="modal-form"><div class="form-grid-2"><div><label>Año</label><input type="number" name="anio" value="'.date('Y').'" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Concepto</label><input name="concepto" required></div><div><label>Importe previsto anual</label><input type="number" step="0.01" name="importe" required></div><div><label>Documento</label><select name="documento_origen" onchange="var f=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_archivo]&quot;),u=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_url]&quot;);this.closest(&quot;form&quot;).querySelector(&quot;.budget-file-field&quot;).hidden=this.value!==&quot;ARCHIVO&quot;;this.closest(&quot;form&quot;).querySelector(&quot;.budget-url-field&quot;).hidden=this.value!==&quot;ENLACE&quot;;f.required=this.value===&quot;ARCHIVO&quot;;u.required=this.value===&quot;ENLACE&quot;"><option value="">Sin documento ahora</option><option value="ARCHIVO">📎 Subir archivo</option><option value="ENLACE">🔗 Añadir enlace externo</option></select></div><div class="budget-file-field" hidden><label>Archivo</label><input type="file" name="documento_archivo" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv"><small class="muted">Máximo 25 MB.</small></div><div class="budget-url-field" hidden><label>Enlace externo</label><input type="url" name="documento_url" placeholder="https://..."></div><div><label>Título del documento</label><input name="documento_titulo" placeholder="Presupuesto, oferta, informe..."></div></div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Añadir</button></div></form></div></dialog>';
     echo '<table><tr><th>Año</th><th>Tipo</th><th>Concepto</th><th>Previsto</th><th>Real</th><th>Documentos</th></tr>';
     foreach($pdo->query("SELECT * FROM presupuestos ORDER BY anio DESC,id DESC") as $x){ echo '<tr><td>'.$x['anio'].'</td><td>'.$x['tipo_gasto'].'</td><td>'.h($x['concepto']).'</td><td>'.number_format($x['importe_previsto'],2,',','.').' €</td><td>'.number_format($x['importe_real'],2,',','.').' €</td><td>'; documentos_panel('presupuesto',(int)$x['id'],'Presupuesto · Documentos',true); echo '</td></tr>'; }
     echo '</table>';
@@ -393,13 +437,31 @@ break;
 
 case 'derramas':
     if(can('GESTION_DERRAMAS') && $_SERVER['REQUEST_METHOD']==='POST'){
-        $pdo->prepare("INSERT INTO derramas(titulo,descripcion,fecha_acuerdo_junta,importe_total,tipo,fecha_limite) VALUES(?,?,?,?,?,?)")
-        ->execute([$_POST['titulo'],$_POST['descripcion'],$_POST['fecha_acuerdo'],$_POST['importe'],$_POST['tipo'],$_POST['limite']]);
-        $newId=(int)$pdo->lastInsertId();
-        log_action('Creó derrama','derramas');header('Location:index.php?page=derramas&docs_tipo=derrama&docs_id='.$newId);exit;
+        try{
+            $pdo->beginTransaction();
+            $pdo->prepare("INSERT INTO derramas(titulo,descripcion,fecha_acuerdo_junta,importe_total,tipo,fecha_limite) VALUES(?,?,?,?,?,?)")
+                ->execute([$_POST['titulo'],$_POST['descripcion'],$_POST['fecha_acuerdo'],$_POST['importe'],$_POST['tipo'],$_POST['limite']]);
+            $newId=(int)$pdo->lastInsertId();
+            $documentoOrigen=$_POST['documento_origen']??'';
+            if($documentoOrigen==='ARCHIVO'){
+                $up=documento_upload($_FILES['documento_archivo']??[]);
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_path,archivo_nombre,archivo_mime,archivo_tamano,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento de la derrama','Derrama','ARCHIVO',$up['path'],$up['name'],$up['mime'],$up['size'],'derrama',$newId,current_user()['id']]);
+            }elseif($documentoOrigen==='ENLACE'){
+                $url=trim($_POST['documento_url']??'');
+                if(!external_url($url)) throw new Exception('Indica un enlace externo válido (http:// o https://).');
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?)")
+                    ->execute([trim($_POST['documento_titulo']??'')?:'Documento de la derrama','Derrama','ENLACE',$url,'derrama',$newId,current_user()['id']]);
+            }
+            $pdo->commit();
+            log_action('Creó derrama','derramas');header('Location:index.php?page=derramas&docs_tipo=derrama&docs_id='.$newId);exit;
+        }catch(Throwable $e){
+            if($pdo->inTransaction()) $pdo->rollBack();
+            echo '<div class="alert">'.h('No se pudo crear la derrama: '.$e->getMessage()).'</div>';
+        }
     }
     echo '<div class="section-head"><h1>Derramas</h1>'.(can('GESTION_DERRAMAS')?'<button type="button" class="btn" onclick="document.getElementById(&quot;levy-modal&quot;).showModal()">+ Nueva derrama</button>':'').'</div>';
-    if(can('GESTION_DERRAMAS')) echo '<dialog id="levy-modal" class="app-modal"><div class="modal-head"><h2>Nueva derrama</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><div class="form-grid-2"><div><label>Título</label><input name="titulo" required></div><div><label>Importe total</label><input type="number" step="0.01" name="importe" required></div><div><label>Fecha acuerdo</label><input type="date" name="fecha_acuerdo"></div><div><label>Fecha límite</label><input type="date" name="limite" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Descripción</label><textarea name="descripcion"></textarea></div></div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Crear derrama</button></div></form></div></dialog>';
+    if(can('GESTION_DERRAMAS')) echo '<dialog id="levy-modal" class="app-modal wide-modal"><div class="modal-head"><h2>Nueva derrama</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" enctype="multipart/form-data" class="modal-form"><div class="form-grid-2"><div><label>Título</label><input name="titulo" required></div><div><label>Importe total</label><input type="number" step="0.01" name="importe" required></div><div><label>Fecha acuerdo</label><input type="date" name="fecha_acuerdo"></div><div><label>Fecha límite</label><input type="date" name="limite" required></div><div><label>Tipo</label><select name="tipo"><option>GENERAL</option><option>ESCALERA</option></select></div><div><label>Descripción</label><textarea name="descripcion"></textarea></div><div><label>Documento</label><select name="documento_origen" onchange="var f=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_archivo]&quot;),u=this.closest(&quot;form&quot;).querySelector(&quot;input[name=documento_url]&quot;);this.closest(&quot;form&quot;).querySelector(&quot;.levy-file-field&quot;).hidden=this.value!==&quot;ARCHIVO&quot;;this.closest(&quot;form&quot;).querySelector(&quot;.levy-url-field&quot;).hidden=this.value!==&quot;ENLACE&quot;;f.required=this.value===&quot;ARCHIVO&quot;;u.required=this.value===&quot;ENLACE&quot;"><option value="">Sin documento ahora</option><option value="ARCHIVO">📎 Subir archivo</option><option value="ENLACE">🔗 Añadir enlace externo</option></select></div><div class="levy-file-field" hidden><label>Archivo</label><input type="file" name="documento_archivo" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv"><small class="muted">Máximo 25 MB.</small></div><div class="levy-url-field" hidden><label>Enlace externo</label><input type="url" name="documento_url" placeholder="https://..."></div><div><label>Título del documento</label><input name="documento_titulo" placeholder="Acta, presupuesto, factura..."></div></div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Crear derrama</button></div></form></div></dialog>';
     echo '<table><tr><th>Título</th><th>Tipo</th><th>Importe</th><th>Límite</th><th>Documentos</th></tr>';
     foreach($pdo->query("SELECT * FROM derramas ORDER BY id DESC") as $x){ echo '<tr><td>'.h($x['titulo']).'</td><td>'.$x['tipo'].'</td><td>'.number_format($x['importe_total'],2,',','.').' €</td><td>'.$x['fecha_limite'].'</td><td>'; documentos_panel('derrama',(int)$x['id'],'Derrama · Documentos',true); echo '</td></tr>'; }
     echo '</table>';
