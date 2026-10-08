@@ -2,6 +2,7 @@
 require_once __DIR__.'/../app/auth.php';
 require_once __DIR__.'/../app/functions.php';
 require_once __DIR__.'/../app/backups.php';
+require_once __DIR__.'/../app/documents.php';
 
 $page=$_GET['page']??'dashboard';
 if($page==='logout'){ logout_user(); header('Location: index.php?page=login'); exit; }
@@ -17,6 +18,10 @@ if($page==='login'){
     <form method="post" class="form"><label>Email</label><input name="email" type="email" required><label>Contraseña</label><input name="password" type="password" required><br><br><button class="btn">Entrar</button></form></div></body></html><?php exit;
 }
 require_login();
+
+if($page==='documento_descarga'){
+    documento_download($pdo,(int)($_GET['id']??0));
+}
 
 if($page==='backups' && ($_GET['action']??'')==='download'){
     if(!can('GESTION_BACKUPS')){http_response_code(403);exit('No tienes permiso para gestionar copias de seguridad.');}
@@ -45,38 +50,40 @@ if($page==='backups' && $_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['res
     }
 }
 
-// Gestión común de documentos externos asociados a entidades.
+// Gestión común de documentos asociados a entidades: archivos subidos o enlaces externos.
 if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['documento_action'])){
     if(!can('GESTION_DOCUMENTOS')){ http_response_code(403); exit('No tienes permiso para gestionar documentos.'); }
     $action=$_POST['documento_action'];
     $tipo=trim($_POST['documento_tipo']??''); $entidadId=(int)($_POST['documento_entidad_id']??0);
-    $allowed=[
-        'gasto'=>['table'=>'gastos','permission'=>'GESTION_GASTOS'],
-        'presupuesto'=>['table'=>'presupuestos','permission'=>'GESTION_PRESUPUESTOS'],
-        'recibo'=>['table'=>'recibos','permission'=>'GESTION_RECIBOS'],
-        'derrama'=>['table'=>'derramas','permission'=>'GESTION_DERRAMAS'],
-        'incidencia'=>['table'=>'incidencias','permission'=>'GESTION_INCIDENCIAS'],
-        'votacion'=>['table'=>'votaciones','permission'=>'GESTION_VOTACIONES']
-    ];
+    $allowed=['gasto'=>'GESTION_GASTOS','presupuesto'=>'GESTION_PRESUPUESTOS','recibo'=>'GESTION_RECIBOS','derrama'=>'GESTION_DERRAMAS','incidencia'=>'GESTION_INCIDENCIAS','votacion'=>'GESTION_VOTACIONES'];
+    $tables=['gasto'=>'gastos','presupuesto'=>'presupuestos','recibo'=>'recibos','derrama'=>'derramas','incidencia'=>'incidencias','votacion'=>'votaciones'];
     if(!isset($allowed[$tipo]) || $entidadId<1) exit('Entidad documental no válida.');
-    if(!can($allowed[$tipo]['permission'])){ http_response_code(403); exit('No tienes permiso para gestionar esta entidad.'); }
-    $table=$allowed[$tipo]['table'];
-    $st=$pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE id=?"); $st->execute([$entidadId]);
+    if(!can($allowed[$tipo])){http_response_code(403);exit('No tienes permiso para gestionar esta entidad.');}
+    $table=$tables[$tipo]; $st=$pdo->prepare("SELECT COUNT(*) FROM {$table} WHERE id=?");$st->execute([$entidadId]);
     if((int)$st->fetchColumn()===0) exit('La entidad no existe.');
     try{
         if($action==='add'){
-            $titulo=trim($_POST['documento_titulo']??''); $categoria=trim($_POST['documento_categoria']??''); $url=trim($_POST['documento_url']??'');
-            if($titulo==='' || !external_url($url)) throw new Exception('Indica un título y un enlace externo válido (http:// o https://).');
-            $pdo->prepare("INSERT INTO documentos(titulo,categoria,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?)")->execute([$titulo,$categoria?:null,$url,$tipo,$entidadId,current_user()['id']]);
+            $titulo=trim($_POST['documento_titulo']??'');$categoria=trim($_POST['documento_categoria']??'');
+            $tipoDoc=$_POST['documento_origen']??'ARCHIVO';$url=trim($_POST['documento_url']??'');
+            if($titulo==='') throw new Exception('El título es obligatorio.');
+            if($tipoDoc==='ENLACE'){
+                if(!external_url($url)) throw new Exception('Indica un enlace externo válido (http:// o https://).');
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_url,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?)")->execute([$titulo,$categoria?:null,'ENLACE',$url,$tipo,$entidadId,current_user()['id']]);
+            }else{
+                $up=documento_upload($_FILES['documento_archivo']??[]);
+                $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_path,archivo_nombre,archivo_mime,archivo_tamano,entidad_tipo,entidad_id,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)")->execute([$titulo,$categoria?:null,'ARCHIVO',$up['path'],$up['name'],$up['mime'],$up['size'],$tipo,$entidadId,current_user()['id']]);
+            }
             log_action('Añadió documento a '.$tipo.' #'.$entidadId,'documentos');
         }elseif($action==='delete'){
             $docId=(int)($_POST['documento_id']??0);
-            $pdo->prepare("DELETE FROM documentos WHERE id=? AND entidad_tipo=? AND entidad_id=?")->execute([$docId,$tipo,$entidadId]);
+            $st=$pdo->prepare("SELECT archivo_path FROM documentos WHERE id=? AND entidad_tipo=? AND entidad_id=?");$st->execute([$docId,$tipo,$entidadId]);$doc=$st->fetch();
+            if($doc){$pdo->prepare("DELETE FROM documentos WHERE id=? AND entidad_tipo=? AND entidad_id=?")->execute([$docId,$tipo,$entidadId]);documento_delete_file($doc['archivo_path']??null);}
             log_action('Borró documento del '.$tipo.' #'.$entidadId,'documentos');
         }
-        header('Location:index.php?page='.urlencode($page).'&docs_tipo='.urlencode($tipo).'&docs_id='.$entidadId); exit;
-    }catch(Throwable $e){ exit('No se pudo guardar el documento: '.h($e->getMessage())); }
+        header('Location:index.php?page='.urlencode($page).'&docs_tipo='.urlencode($tipo).'&docs_id='.$entidadId);exit;
+    }catch(Throwable $e){exit('No se pudo guardar el documento: '.h($e->getMessage()));}
 }
+
 
 function layout_start($title){
     $u=current_user();
