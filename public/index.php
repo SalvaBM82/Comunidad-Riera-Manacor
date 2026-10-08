@@ -424,46 +424,61 @@ case 'incidencias':
 break;
 
 case 'documentos':
+    if(!can('GESTION_DOCUMENTOS')){echo '<div class="alert">No tienes permiso para gestionar documentos.</div>';break;}
     $docError='';
-    if($_SERVER['REQUEST_METHOD']==='POST' && can('GESTION_DOCUMENTOS')){
+    if($_SERVER['REQUEST_METHOD']==='POST'){
         try{
             $action=$_POST['action']??'';
             if($action==='create_document' || $action==='update_document'){
-                $id=(int)($_POST['id']??0);
-                $titulo=trim($_POST['titulo']??''); $categoria=trim($_POST['categoria']??''); $url=trim($_POST['archivo_url']??'');
-                if($titulo==='' || !external_url($url)) throw new Exception('Indica un título y un enlace externo válido (http:// o https://).');
+                $id=(int)($_POST['id']??0);$titulo=trim($_POST['titulo']??'');$categoria=trim($_POST['categoria']??'');
+                if($titulo==='') throw new Exception('El título es obligatorio.');
+                $origen=$_POST['origen']??'ARCHIVO';
                 if($action==='create_document'){
-                    $pdo->prepare("INSERT INTO documentos(titulo,categoria,archivo_url,created_by) VALUES(?,?,?,?)")->execute([$titulo,$categoria?:null,$url,current_user()['id']]);
-                    log_action('Creó enlace documental','documentos');
+                    if($origen==='ENLACE'){
+                        $url=trim($_POST['archivo_url']??'');if(!external_url($url)) throw new Exception('Indica un enlace externo válido.');
+                        $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_url,created_by) VALUES(?,?,?,?,?)")->execute([$titulo,$categoria?:null,'ENLACE',$url,current_user()['id']]);
+                    }else{
+                        $up=documento_upload($_FILES['archivo']??[]);
+                        $pdo->prepare("INSERT INTO documentos(titulo,categoria,tipo,archivo_path,archivo_nombre,archivo_mime,archivo_tamano,created_by) VALUES(?,?,?,?,?,?,?,?)")->execute([$titulo,$categoria?:null,'ARCHIVO',$up['path'],$up['name'],$up['mime'],$up['size'],current_user()['id']]);
+                    }
+                    log_action('Creó documento','documentos');
                 }else{
-                    $pdo->prepare("UPDATE documentos SET titulo=?,categoria=?,archivo_url=? WHERE id=?")->execute([$titulo,$categoria?:null,$url,$id]);
-                    log_action('Actualizó enlace documental #'.$id,'documentos');
+                    $st=$pdo->prepare("SELECT * FROM documentos WHERE id=?");$st->execute([$id]);$old=$st->fetch();if(!$old) throw new Exception('Documento no encontrado.');
+                    if($origen==='ENLACE'){
+                        $url=trim($_POST['archivo_url']??'');if(!external_url($url)) throw new Exception('Indica un enlace externo válido.');
+                        $pdo->prepare("UPDATE documentos SET titulo=?,categoria=?,tipo='ENLACE',archivo_url=?,archivo_path=NULL,archivo_nombre=NULL,archivo_mime=NULL,archivo_tamano=NULL WHERE id=?")->execute([$titulo,$categoria?:null,$url,$id]);
+                        documento_delete_file($old['archivo_path']??null);
+                    }elseif(!empty($_FILES['archivo']['name'])){
+                        $up=documento_upload($_FILES['archivo']);
+                        $pdo->prepare("UPDATE documentos SET titulo=?,categoria=?,tipo='ARCHIVO',archivo_url=NULL,archivo_path=?,archivo_nombre=?,archivo_mime=?,archivo_tamano=? WHERE id=?")->execute([$titulo,$categoria?:null,$up['path'],$up['name'],$up['mime'],$up['size'],$id]);
+                        documento_delete_file($old['archivo_path']??null);
+                    }else{
+                        $pdo->prepare("UPDATE documentos SET titulo=?,categoria=? WHERE id=?")->execute([$titulo,$categoria?:null,$id]);
+                    }
+                    log_action('Actualizó documento #'.$id,'documentos');
                 }
                 header('Location:index.php?page=documentos');exit;
             }
             if($action==='delete_document'){
-                $id=(int)$_POST['id']; $pdo->prepare("DELETE FROM documentos WHERE id=?")->execute([$id]);
-                log_action('Borró enlace documental #'.$id,'documentos'); header('Location:index.php?page=documentos');exit;
+                $id=(int)$_POST['id'];$st=$pdo->prepare("SELECT archivo_path FROM documentos WHERE id=?");$st->execute([$id]);$old=$st->fetch();
+                $pdo->prepare("DELETE FROM documentos WHERE id=?")->execute([$id]);documento_delete_file($old['archivo_path']??null);
+                log_action('Borró documento #'.$id,'documentos');header('Location:index.php?page=documentos');exit;
             }
         }catch(Throwable $e){$docError=$e->getMessage();}
     }
     if($docError) echo '<div class="alert">'.h($docError).'</div>';
-    $editDoc=null; $editDocId=(int)($_GET['edit']??0);
-    if($editDocId && can('GESTION_DOCUMENTOS')){$st=$pdo->prepare("SELECT * FROM documentos WHERE id=?");$st->execute([$editDocId]);$editDoc=$st->fetch();}
-    echo '<div class="section-head"><div><h1>Documentos</h1><p class="muted">Los documentos se gestionan mediante enlaces externos. No se almacenan archivos en el servidor.</p></div>'.(can('GESTION_DOCUMENTOS')?'<button type="button" class="btn" onclick="document.getElementById(&quot;document-create-modal&quot;).showModal()">+ Nuevo documento</button>':'').'</div>';
-    if(can('GESTION_DOCUMENTOS')){
-        echo '<dialog id="document-create-modal" class="app-modal"><div class="modal-head"><h2>Nuevo documento</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="create_document"><label>Título</label><input name="titulo" required><label>Categoría</label><input name="categoria" placeholder="Acta, estatutos, seguro, factura..."><label>Enlace externo</label><input type="url" name="archivo_url" placeholder="https://..." required><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Añadir enlace</button></div></form></div></dialog>';
-    }
+    echo '<div class="section-head"><div><h1>Documentos</h1><p class="muted">Puedes subir archivos al servidor o guardar enlaces externos.</p></div><button type="button" class="btn" onclick="document.getElementById(&quot;document-create-modal&quot;).showModal()">+ Nuevo documento</button></div>';
+    echo '<dialog id="document-create-modal" class="app-modal"><div class="modal-head"><h2>Nuevo documento</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" enctype="multipart/form-data" class="modal-form"><input type="hidden" name="action" value="create_document"><label>Título</label><input name="titulo" required><label>Categoría</label><input name="categoria" placeholder="Acta, estatutos, seguro, factura..."><label>Tipo</label><select name="origen" onchange="this.closest('form').querySelector('.doc-file-field').hidden=this.value!=='ARCHIVO';this.closest('form').querySelector('.doc-url-field').hidden=this.value!=='ENLACE'"><option value="ARCHIVO">Archivo subido</option><option value="ENLACE">Enlace externo</option></select><div class="doc-file-field"><label>Archivo</label><input type="file" name="archivo" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv" required><small class="muted">Máximo 25 MB.</small></div><div class="doc-url-field" hidden><label>Enlace externo</label><input type="url" name="archivo_url" placeholder="https://..."></div><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Guardar documento</button></div></form></div></dialog>';
     $docs=$pdo->query("SELECT d.*,u.email FROM documentos d LEFT JOIN usuarios u ON u.id=d.created_by ORDER BY d.created_at DESC,d.id DESC")->fetchAll();
-    echo '<div class="card"><h2>Enlaces documentales</h2><table><tr><th>Título</th><th>Categoría</th><th>Enlace</th><th>Fecha</th>'.(can('GESTION_DOCUMENTOS')?'<th>Acciones</th>':'').'</tr>';
+    echo '<div class="card"><h2>Documentos</h2><table><tr><th>Título</th><th>Categoría</th><th>Tipo</th><th>Documento</th><th>Fecha</th><th>Acciones</th></tr>';
     foreach($docs as $d){
-        echo '<tr><td>'.h($d['titulo']).'</td><td>'.h($d['categoria']??'').'</td><td><a href="'.h($d['archivo_url']).'" target="_blank" rel="noopener noreferrer">Abrir documento</a></td><td>'.h($d['created_at']).'</td>';
-        if(can('GESTION_DOCUMENTOS')) echo '<td><button type="button" class="btn gray" onclick="document.getElementById(&quot;document-edit-'.$d['id'].'&quot;).showModal()">Editar</button> <form method="post" style="display:inline" onsubmit="return confirm(&quot;¿Borrar este enlace?&quot;)"><input type="hidden" name="action" value="delete_document"><input type="hidden" name="id" value="'.$d['id'].'"><button class="btn gray">Borrar</button></form></td>';
-        echo '</tr>';
+        $link=$d['tipo']==='ARCHIVO'?'index.php?page=documento_descarga&id='.$d['id']:$d['archivo_url'];
+        $label=$d['tipo']==='ARCHIVO'?'Descargar':'Abrir enlace';
+        echo '<tr><td>'.h($d['titulo']).'</td><td>'.h($d['categoria']??'').'</td><td>'.($d['tipo']==='ARCHIVO'?'<span class="pill">Archivo</span>':'<span class="pill">Enlace</span>').'</td><td><a href="'.h($link).'"'.($d['tipo']==='ENLACE'?' target="_blank" rel="noopener noreferrer"':'').'>'.$label.'</a>'.($d['tipo']==='ARCHIVO'?' <small class="muted">('.number_format(((int)$d['archivo_tamano'])/1048576,2,',','.').' MB)</small>':'').'</td><td>'.h($d['created_at']).'</td><td><button type="button" class="btn gray" onclick="document.getElementById(&quot;document-edit-'.$d['id'].'&quot;).showModal()">Editar</button> <form method="post" style="display:inline" onsubmit="return confirm(&quot;¿Borrar este documento?&quot;)"><input type="hidden" name="action" value="delete_document"><input type="hidden" name="id" value="'.$d['id'].'"><button class="btn gray">Borrar</button></form></td></tr>';
     }
     echo '</table></div>';
-    if(can('GESTION_DOCUMENTOS')){
-        foreach($docs as $d) echo '<dialog id="document-edit-'.$d['id'].'" class="app-modal"><div class="modal-head"><h2>Editar documento</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" class="modal-form"><input type="hidden" name="action" value="update_document"><input type="hidden" name="id" value="'.$d['id'].'"><label>Título</label><input name="titulo" value="'.h($d['titulo']).'" required><label>Categoría</label><input name="categoria" value="'.h($d['categoria']??'').'"><label>Enlace externo</label><input type="url" name="archivo_url" value="'.h($d['archivo_url']).'" required><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Guardar cambios</button></div></form></div></dialog>';
+    foreach($docs as $d){
+        echo '<dialog id="document-edit-'.$d['id'].'" class="app-modal"><div class="modal-head"><h2>Editar documento</h2><button type="button" class="modal-close" onclick="this.closest(&quot;dialog&quot;).close()">×</button></div><div class="modal-body"><form method="post" enctype="multipart/form-data" class="modal-form"><input type="hidden" name="action" value="update_document"><input type="hidden" name="id" value="'.$d['id'].'"><label>Título</label><input name="titulo" value="'.h($d['titulo']).'" required><label>Categoría</label><input name="categoria" value="'.h($d['categoria']??'').'"><label>Tipo</label><select name="origen"><option value="ARCHIVO"'.($d['tipo']==='ARCHIVO'?' selected':'').'>Archivo subido</option><option value="ENLACE"'.($d['tipo']==='ENLACE'?' selected':'').'>Enlace externo</option></select>'.($d['tipo']==='ARCHIVO'?'<p class="muted">Archivo actual: '.h($d['archivo_nombre']??'').'. Si seleccionas otro, se sustituirá.</p>':'').'<div><label>Nuevo archivo (opcional)</label><input type="file" name="archivo" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv"></div><label>Enlace externo (si eliges Enlace)</label><input type="url" name="archivo_url" value="'.h($d['archivo_url']??'')."" placeholder="https://..."><div class="modal-actions"><button type="button" class="btn gray" onclick="this.closest(&quot;dialog&quot;).close()">Cancelar</button><button class="btn">Guardar cambios</button></div></form></div></dialog>";
     }
 break;
 
