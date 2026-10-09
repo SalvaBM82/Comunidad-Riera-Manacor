@@ -115,6 +115,7 @@ function layout_start($title){
         <?php if(can('GESTION_BACKUPS')): ?><a class="nav-link<?=($currentPage==='backups'?' active':'')?>" href="index.php?page=backups"><span class="nav-icon">💾</span><span>Backups</span></a><?php endif; ?>
         <?php endif; ?>
     </nav>
+    <a class="mobile-sidebar-logout" href="index.php?page=logout"><span class="nav-icon">↪️</span><span>Cerrar sesión</span></a>
     </aside><main class="main"><?php
 }
 function layout_end(){ ?></main></div></body></html><?php }
