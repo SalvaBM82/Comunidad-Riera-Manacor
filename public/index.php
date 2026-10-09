@@ -89,7 +89,7 @@ function layout_start($title){
     $u=current_user();
     $currentPage=$_GET['page']??'dashboard';
     ?><!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($title)?> · Gestión Comunidad</title><link rel="stylesheet" href="style.css"></head><body>
-    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><div class="user-info"><span><?=h($u['unidad_nombre']??'')?></span><span class="user-separator">·</span><span><?=h($u['rol_nombre']??role_label($u['rol']))?></span><a class="logout" href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside class="sidebar">
+    <header class="top"><div class="brand">🏠 Gestión Comunidad</div><button type="button" class="mobile-menu-toggle" aria-label="Abrir menú" aria-expanded="false" onclick="toggleMobileMenu()">☰ <span>Menú</span></button><div class="user-info"><span><?=h($u['unidad_nombre']??'')?></span><span class="user-separator">·</span><span><?=h($u['rol_nombre']??role_label($u['rol']))?></span><a class="logout" href="index.php?page=logout">Salir</a></div></header><div class="wrap"><aside class="sidebar">
     <nav class="sidebar-nav">
         <div class="nav-title">Comunidad</div>
         <a class="nav-link<?=($currentPage==='dashboard'?' active':'')?>" href="index.php"><span class="nav-icon">📊</span><span>Inicio</span></a>
@@ -117,7 +117,7 @@ function layout_start($title){
     </nav>
     </aside><main class="main"><?php
 }
-function layout_end(){ ?></main></div></body></html><?php }
+function layout_end(){ ?><script>function toggleMobileMenu(){const w=document.body;const open=w.classList.toggle("mobile-menu-open");const b=document.querySelector(".mobile-menu-toggle");if(b){b.setAttribute("aria-expanded",open?"true":"false");b.setAttribute("aria-label",open?"Cerrar menú":"Abrir menú");} }document.addEventListener("click",function(e){if(!document.body.classList.contains("mobile-menu-open"))return;if(e.target.closest(".sidebar")||e.target.closest(".mobile-menu-toggle"))return;document.body.classList.remove("mobile-menu-open");const b=document.querySelector(".mobile-menu-toggle");if(b){b.setAttribute("aria-expanded","false");b.setAttribute("aria-label","Abrir menú");}});document.addEventListener("keydown",function(e){if(e.key==="Escape"){document.body.classList.remove("mobile-menu-open");const b=document.querySelector(".mobile-menu-toggle");if(b){b.setAttribute("aria-expanded","false");b.setAttribute("aria-label","Abrir menú");}}});document.querySelectorAll(".nav-link").forEach(function(a){a.addEventListener("click",function(){document.body.classList.remove("mobile-menu-open");const b=document.querySelector(".mobile-menu-toggle");if(b){b.setAttribute("aria-expanded","false");b.setAttribute("aria-label","Abrir menú");}});});</script></main></div></body></html><?php }
 
 // Procesar Usuarios antes de renderizar HTML: permite redirects y evita problemas de headers.
 if($page==='usuarios' && $_SERVER['REQUEST_METHOD']==='POST'){
