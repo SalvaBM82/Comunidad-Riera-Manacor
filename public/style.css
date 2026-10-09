@@ -24,3 +24,47 @@
 /* Navegación móvil */
 .mobile-menu-check{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important;opacity:0!important}.mobile-menu-toggle{display:none;border:0;border-radius:9px;padding:9px 12px;background:#111827;color:#fff;font-weight:700;cursor:pointer;font-size:14px;align-items:center;gap:7px;margin-left:auto;margin-right:10px}.mobile-menu-toggle span{font-size:13px}
 @media(max-width:650px){.top{position:relative;z-index:1100}.mobile-menu-toggle{display:inline-flex}.top .user-info{margin-left:0}.wrap{position:relative}.sidebar{position:fixed;z-index:1050;left:0;top:64px;bottom:0;width:min(300px,86vw)!important;height:calc(100vh - 64px);overflow-y:auto;transform:translateX(-105%);transition:transform .2s ease;box-shadow:12px 0 30px #00000035;padding:16px 12px!important;display:block!important}.mobile-menu-check:checked~.top~.wrap .sidebar{transform:translateX(0)}.mobile-menu-check:checked~.top~.wrap .main:before{content:"";position:fixed;z-index:1000;inset:64px 0 0;background:#0f172a80}.sidebar-nav{padding-bottom:20px}.nav-link{display:flex;margin:3px 0;padding:12px}.nav-title{margin:18px 8px 7px}.main{padding:15px}.user-info .logout{display:none}}
+
+
+/* Adaptación responsive de contenidos: escritorio sin cambios */
+@media(max-width:650px){
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  body{font-size:14px;overflow-x:hidden}
+  .top{height:58px;min-height:58px;padding:0 10px}
+  .brand{font-size:15px;white-space:nowrap}
+  .mobile-menu-toggle{padding:8px 10px;margin-right:0;font-size:13px}
+  .wrap{min-height:calc(100vh - 58px)}
+  .main{width:100%;min-width:0;max-width:100%;padding:12px;overflow-x:hidden}
+  h1{font-size:22px;line-height:1.2}
+  h2{font-size:18px;line-height:1.25}
+  h3{font-size:16px}
+  p{line-height:1.45}
+  .page-head,.section-head{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
+  .page-head>div,.section-head>div{width:100%;min-width:0}
+  .page-head .btn,.section-head>.btn{max-width:100%;white-space:normal}
+  .card{padding:13px;border-radius:10px;min-width:0}
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .big{font-size:21px;overflow-wrap:anywhere}
+  .muted{font-size:12px}
+  .btn{padding:8px 10px;font-size:13px;max-width:100%}
+  table{display:block;width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px}
+  th,td{padding:8px;font-size:12px;white-space:normal}
+  th{white-space:nowrap}
+  .form{padding:14px}
+  .form input,.form select,.form textarea{font-size:16px;max-width:100%}
+  .app-modal,.app-modal.wide-modal,.app-modal.small-modal,.role-modal{width:calc(100vw - 16px);max-width:calc(100vw - 16px);max-height:90dvh;overflow-y:auto;border-radius:12px}
+  .modal-head,.modal-body,.role-modal-header,.role-modal-form{padding:14px}
+  .modal-form input:not([type=checkbox]):not([type=radio]),.modal-form select,.modal-form textarea{font-size:16px}
+  .form-grid-2,.role-fields{grid-template-columns:minmax(0,1fr)}
+  .permissions-grid{grid-template-columns:minmax(0,1fr);gap:5px}
+  .modal-actions,.role-modal-actions{flex-wrap:wrap;gap:7px}
+  .modal-actions .btn,.role-modal-actions .btn{flex:1 1 auto}
+  .role-tags{min-width:120px}
+}
+@media(max-width:380px){
+  .grid{grid-template-columns:minmax(0,1fr)}
+  .brand{font-size:14px}
+  .main{padding:9px}
+  .card{padding:11px}
+  .page-head h1,.section-head h1{font-size:20px}
+}
