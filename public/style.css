@@ -68,3 +68,12 @@
   .card{padding:11px}
   .page-head h1,.section-head h1{font-size:20px}
 }
+
+/* Acceso a cerrar sesión dentro del menú móvil */
+.mobile-sidebar-logout{display:none}
+@media(max-width:650px){
+  .mobile-sidebar-logout{display:flex;align-items:center;gap:11px;margin:14px 3px 8px;padding:13px 12px;border-top:1px solid #374151;border-radius:8px;color:#fecaca;text-decoration:none;font-weight:700}
+  .mobile-sidebar-logout .nav-icon{width:22px;text-align:center}
+  .mobile-sidebar-logout:active{background:#1f2937}
+}
+
